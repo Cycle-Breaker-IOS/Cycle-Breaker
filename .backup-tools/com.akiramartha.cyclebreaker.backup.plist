@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.akiramartha.cyclebreaker.backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/akiramartha/cycle-breaker/.backup-tools/backup.sh</string>
+    </array>
+
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/akiramartha/cycle-breaker/index.html</string>
+    </array>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/akiramartha/cycle-breaker/.backup-tools/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/akiramartha/cycle-breaker/.backup-tools/launchd.err.log</string>
+</dict>
+</plist>

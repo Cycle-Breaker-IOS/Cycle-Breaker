@@ -1,0 +1,1354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Cycle Breaker</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #0f0f0f;
+      --surface:    #1a1a1a;
+      --border:     #2a2a2a;
+      --text:       #f0f0f0;
+      --muted:      #555;
+      --muted2:     #888;
+      --accent:     #E8571A;
+      --accent-bg:  #1e1410;
+      --r-card:     12px;
+      --r-btn:      14px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      justify-content: center;
+    }
+
+    #app {
+      width: 100%;
+      max-width: 480px;
+      position: relative;
+    }
+
+    /* ── TRANSITIONS ── */
+    .screen {
+      display: none;
+      flex-direction: column;
+      padding: 28px 20px 100px;
+      min-height: 100dvh;
+    }
+    .screen.active {
+      display: flex;
+      animation: fadeUp 0.32s cubic-bezier(0.22,1,0.36,1) both;
+    }
+    .screen.out {
+      display: flex !important;
+      animation: fadeDown 0.2s ease forwards;
+      pointer-events: none;
+    }
+    @keyframes fadeUp   { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
+    @keyframes fadeDown { from { opacity:1 } to { opacity:0; transform:translateY(-8px) } }
+
+    /* ── BOTTOM NAV ── */
+    .nav-bar {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-around;
+      padding: 14px 20px 28px;
+      border-top: 0.5px solid #1e1e1e;
+      background: var(--bg);
+      z-index: 100;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .nav-icon { font-size: 20px; }
+    .nav-lbl {
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .nav-lbl.active { color: var(--accent); }
+
+    /* ── HOME SCREEN ── */
+    #home { gap: 0; }
+
+    .app-name {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .date-line {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    .hero-text {
+      font-size: clamp(20px, 5.5vw, 26px);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.28;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .sub-text {
+      font-size: 13px;
+      color: var(--muted2);
+      line-height: 1.55;
+      margin-bottom: 28px;
+    }
+
+    /* 3-stat row */
+    .streak-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .streak-card {
+      flex: 1;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 12px 10px;
+      text-align: center;
+    }
+    .streak-val {
+      font-size: 22px;
+      font-weight: 500;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .streak-lbl {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* 7-dot week strip */
+    .dots-row {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 16px;
+      justify-content: center;
+    }
+    .dot {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      background: #1a1a1a;
+      border: 0.5px solid var(--border);
+      flex: 1;
+    }
+    .dot.done { background: var(--accent-bg); border-color: var(--accent); }
+    .dot-day { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    .dot.done .dot-day { color: var(--accent); }
+    .dot-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+    .dot.done .dot-pip { background: var(--accent); }
+
+    /* Pattern badge */
+    .pattern-badge {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .badge-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+    .badge-text { font-size: 12px; color: var(--muted2); line-height: 1.45; }
+    .badge-text strong { color: #ccc; font-weight: 500; }
+
+    /* CTA */
+    .cta-btn {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-btn);
+      padding: 16px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      margin-bottom: 10px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .cta-btn:hover  { opacity: 0.9; }
+    .cta-btn:active { transform: scale(0.98); }
+
+    .secondary-row { display: flex; gap: 8px; }
+    .sec-btn {
+      flex: 1;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 12px 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px;
+      color: var(--muted2);
+      cursor: pointer;
+      text-align: center;
+      line-height: 1.5;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .sec-btn:hover { border-color: #444; color: var(--text); }
+    .sec-icon { font-size: 16px; display: block; margin-bottom: 3px; }
+
+    /* ── MIRROR SCREEN ── */
+    #mirror { gap: 0; }
+
+    .mirror-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .back-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      color: var(--muted2);
+      font-size: 18px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+    }
+    .back-btn svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .q-counter {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .progress-bar {
+      height: 2px;
+      background: #1e1e1e;
+      border-radius: 2px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.45s cubic-bezier(0.22,1,0.36,1);
+    }
+
+    .question-block { display: none; flex-direction: column; }
+    .question-block.active {
+      display: flex;
+      animation: fadeUp 0.3s cubic-bezier(0.22,1,0.36,1) both;
+    }
+
+    .q-text {
+      font-size: clamp(18px, 5vw, 21px);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.3;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+    .q-hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .options { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+
+    .option {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 14px 16px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--muted2);
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+      line-height: 1.4;
+    }
+    .option:hover { border-color: #444; color: var(--text); }
+    .option.selected {
+      background: var(--accent-bg);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .option-check {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      opacity: 0;
+      margin-left: 10px;
+    }
+    .option.selected .option-check { opacity: 1; }
+    .option-check svg {
+      width: 16px; height: 16px;
+      stroke: var(--accent);
+      stroke-width: 2.5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .btn-next {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-btn);
+      padding: 15px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      opacity: 0.3;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn-next.enabled { opacity: 1; pointer-events: auto; }
+    .btn-next:active { transform: scale(0.98); }
+
+    /* ── ONE MOVE SCREEN ── */
+    #onemove {
+      align-items: center;
+      text-align: center;
+      justify-content: center;
+      min-height: calc(100dvh - 100px);
+    }
+
+    .bolt-icon {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: var(--accent-bg);
+      border: 1.5px solid var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 20px;
+      font-size: 22px;
+    }
+
+    .showed-up {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .onemove-title {
+      font-size: clamp(20px, 5.5vw, 24px);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+      margin-bottom: 6px;
+    }
+
+    .onemove-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    .move-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 18px;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 20px;
+    }
+
+    .move-card-label {
+      font-size: 11px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+
+    .move-card-text {
+      font-size: 17px;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.4;
+      margin-bottom: 12px;
+    }
+
+    .move-card-target {
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 0.5px solid var(--border);
+      padding-top: 10px;
+    }
+
+    .move-actions { display: flex; gap: 10px; width: 100%; }
+
+    .btn-did-it {
+      flex: 1;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-card);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn-did-it:hover  { opacity: 0.9; }
+    .btn-did-it:active { transform: scale(0.97); }
+
+    .btn-remind {
+      flex: 1;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px;
+      color: var(--muted2);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-remind:hover { border-color: #444; color: var(--text); }
+
+    /* ── PATTERNS SCREEN ── */
+    #patterns { gap: 0; }
+
+    .patterns-header { margin-bottom: 28px; }
+
+    .screen-eyebrow {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .screen-title {
+      font-size: clamp(22px, 6vw, 28px);
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+
+    .pattern-top {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+    .pattern-top-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .pattern-top-name {
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+    .pattern-top-insight {
+      font-size: 13px;
+      color: var(--muted2);
+      line-height: 1.6;
+      border-top: 0.5px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      margin-top: 6px;
+    }
+
+    .week-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+      margin-bottom: 24px;
+    }
+    .week-cell {
+      aspect-ratio: 1;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+    }
+    .week-cell.done { background: var(--accent-bg); border-color: var(--accent); }
+    .wc-name { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+    .week-cell.done .wc-name { color: var(--accent); }
+    .wc-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+    .week-cell.done .wc-pip { background: var(--accent); }
+
+    .breakdown-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+    .breakdown-item {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 12px 16px;
+    }
+    .breakdown-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+    .breakdown-name { font-size: 12px; font-weight: 500; flex: 1; line-height: 1.3; }
+    .breakdown-count { font-size: 12px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+    .breakdown-bar-bg { height: 3px; background: var(--border); border-radius: 100px; overflow: hidden; }
+    .breakdown-bar-fill { height: 100%; background: var(--accent); border-radius: 100px; transition: width 0.6s cubic-bezier(0.22,1,0.36,1); }
+
+    .pattern-empty { text-align: center; padding: 48px 24px; }
+    .pattern-empty strong { display: block; font-size: 17px; font-weight: 500; margin-bottom: 8px; }
+    .pattern-empty p { font-size: 13px; color: var(--muted2); line-height: 1.6; }
+
+    .btn-ghost {
+      width: 100%;
+      background: transparent;
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-btn);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted2);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-ghost:hover { border-color: #444; color: var(--text); }
+
+    .btn-share {
+      width: 100%;
+      margin-top: 10px;
+      background: #1a1a1a;
+      border: 1px solid var(--accent);
+      border-radius: var(--r-btn);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--accent);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn-share:hover  { opacity: 0.85; }
+    .btn-share:active { transform: scale(0.98); }
+    .btn-share svg {
+      width: 16px; height: 16px;
+      stroke: var(--accent);
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+
+    /* ── HOME SCREEN (rebuilt) ── */
+    #home {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      gap: 0;
+    }
+    .h-appname {
+      font-size: 11px;
+      font-weight: 500;
+      color: #E8571A;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+    .h-date {
+      font-size: 11px;
+      color: #555;
+      margin-bottom: 20px;
+    }
+    .h-headline {
+      font-size: 26px;
+      font-weight: 500;
+      color: #f0f0f0;
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+    .h-subline {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 28px;
+    }
+    .h-stat-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 28px;
+    }
+    .h-stat-card {
+      flex: 1;
+      background: #1a1a1a;
+      border: 0.5px solid #222;
+      border-radius: 12px;
+      padding: 16px 12px;
+      text-align: center;
+    }
+    .h-stat-val {
+      font-size: 28px;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .h-dots {
+      display: flex;
+      gap: 5px;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+    .h-dot {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: #1e1e1e;
+      border: 0.5px solid #2a2a2a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+    }
+    .h-dot.done {
+      background: #E8571A;
+      border: none;
+    }
+    .h-dot .ti {
+      font-size: 10px;
+      color: #333;
+    }
+    .h-dot.done .ti {
+      color: #fff;
+    }
+    .h-badge {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: #1a1a1a;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+    }
+    .h-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #E8571A;
+      flex-shrink: 0;
+    }
+    .h-badge-text {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.4;
+    }
+    .h-badge-text strong {
+      color: #ccc;
+      font-weight: 500;
+    }
+    .h-cta {
+      width: 100%;
+      background: #E8571A;
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      padding: 16px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .h-cta:hover  { opacity: 0.9; }
+    .h-cta:active { transform: scale(0.98); }
+    .h-sec-row {
+      display: flex;
+      gap: 8px;
+    }
+    .h-sec-btn {
+      flex: 1;
+      background: #1a1a1a;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 12px 8px;
+      font-family: inherit;
+      font-size: 11px;
+      color: #666;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .h-sec-btn:hover { border-color: #444; color: #aaa; }
+    .h-sec-btn .ti {
+      font-size: 14px;
+      display: block;
+      margin-bottom: 3px;
+    }
+    /* Nav bar Tabler icon styles */
+    .nav-bar {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+    .nav-item .ti {
+      font-size: 20px;
+      color: #444;
+      display: block;
+    }
+    .nav-item .ti.active { color: #E8571A; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── HOME ── -->
+  <section id="home" class="screen active">
+    <p class="h-appname">THE CYCLE BREAKER</p>
+    <p class="h-date" id="h-today-date"></p>
+    <p class="h-headline">Stop running the same day twice.</p>
+    <p class="h-subline" id="h-subline"></p>
+
+    <div class="h-stat-row">
+      <div class="h-stat-card">
+        <div class="h-stat-val" id="h-stat-streak" style="color:#E8571A">0</div>
+      </div>
+      <div class="h-stat-card">
+        <div class="h-stat-val" id="h-stat-cycles" style="color:#2a2a2a">0</div>
+      </div>
+    </div>
+
+    <div class="h-dots" id="h-dots"></div>
+
+    <div class="h-badge" id="h-badge">
+      <span class="h-badge-dot"></span>
+      <span class="h-badge-text" id="h-badge-text"></span>
+    </div>
+
+    <button class="h-cta" onclick="goTo('mirror')">Start today's mirror</button>
+
+    <div class="h-sec-row">
+      <button class="h-sec-btn" onclick="showPatterns()">
+        <i class="ti ti-chart-bar"></i>Weekly reveal
+      </button>
+      <button class="h-sec-btn" onclick="voiceNote()">
+        <i class="ti ti-microphone"></i>Voice note
+      </button>
+    </div>
+  </section>
+
+  <!-- ── MIRROR ── -->
+  <section id="mirror" class="screen">
+    <div class="mirror-top">
+      <button class="back-btn" onclick="mirrorBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <span class="q-counter" id="q-counter">Question 1 of 3</span>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill" style="width:33%"></div>
+    </div>
+
+    <div class="question-block active" id="q1">
+      <p class="q-text">What did you avoid doing yesterday?</p>
+      <p class="q-hint">Be honest. Nobody's watching.</p>
+      <div class="options">
+        <button class="option" onclick="selectOption(this,'q1')">
+          <span>A hard conversation I kept putting off</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q1')">
+          <span>Taking action on something I already know</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q1')">
+          <span>Sitting with an uncomfortable feeling</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q1')">
+          <span>Being fully honest with myself</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+      </div>
+      <button class="btn-next" id="btn-next-1" onclick="nextQuestion()">Next question</button>
+    </div>
+
+    <div class="question-block" id="q2">
+      <p class="q-text">What pattern kept showing up?</p>
+      <p class="q-hint">Be honest. Nobody's watching.</p>
+      <div class="options">
+        <button class="option" onclick="selectOption(this,'q2')">
+          <span>Procrastinating until it felt too late</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q2')">
+          <span>Doubting myself before I even started</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q2')">
+          <span>Choosing distraction over presence</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q2')">
+          <span>Saying yes when I meant no</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+      </div>
+      <button class="btn-next" id="btn-next-2" onclick="nextQuestion()">Next question</button>
+    </div>
+
+    <div class="question-block" id="q3">
+      <p class="q-text">What will you commit to today?</p>
+      <p class="q-hint">Pick one thing. Just one.</p>
+      <div class="options">
+        <button class="option" onclick="selectOption(this,'q3')">
+          <span>Set one clear, non-negotiable intention</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q3')">
+          <span>Have the conversation I've been avoiding</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q3')">
+          <span>Stop waiting for perfect conditions to begin</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+        <button class="option" onclick="selectOption(this,'q3')">
+          <span>Be radically honest with myself today</span>
+          <span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        </button>
+      </div>
+      <button class="btn-next" id="btn-next-3" onclick="nextQuestion()">Finish ✓</button>
+    </div>
+  </section>
+
+  <!-- ── ONE MOVE ── -->
+  <section id="onemove" class="screen">
+    <div class="bolt-icon">⚡</div>
+    <p class="showed-up">You showed up.</p>
+    <h2 class="onemove-title">Your one move today</h2>
+    <p class="onemove-sub">Based on your pattern</p>
+
+    <div class="move-card">
+      <p class="move-card-label">Do this before noon</p>
+      <p class="move-card-text" id="move-card-text"></p>
+      <p class="move-card-target" id="move-card-target"></p>
+    </div>
+
+    <div class="move-actions">
+      <button class="btn-did-it" onclick="didIt()">I did it</button>
+      <button class="btn-remind" onclick="remindMe()">Remind me</button>
+    </div>
+
+    <button class="btn-share" onclick="shareExpose()">
+      <svg viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+      Share your exposé
+    </button>
+  </section>
+
+  <!-- ── SHARE CARD (off-screen, rendered by html2canvas) ── -->
+  <div id="share-card" style="
+    position:fixed; left:-9999px; top:-9999px;
+    width:1080px; height:1920px;
+    background:#0f0f0f;
+    border-radius:20px;
+    padding:60px;
+    display:flex; flex-direction:column; justify-content:space-between;
+    font-family:'Space Grotesk',sans-serif;
+    box-sizing:border-box;
+  ">
+    <!-- TOP -->
+    <p style="font-size:13px;color:#E8571A;text-transform:uppercase;letter-spacing:0.1em;font-weight:500;margin:0;">THE CYCLE BREAKER</p>
+
+    <!-- MIDDLE -->
+    <div style="display:flex;flex-direction:column;">
+      <p id="sc-pattern-label" style="font-size:12px;color:#444;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px;">MY PATTERN WAS</p>
+      <div style="background:#1a1a1a;border-left:2px solid #E8571A;border-radius:0 10px 10px 0;padding:16px 18px;">
+        <p id="sc-quote" style="font-size:16px;color:#f0f0f0;line-height:1.5;margin:0;"></p>
+      </div>
+      <div style="height:28px;"></div>
+      <p style="font-size:12px;color:#444;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 10px;">I BROKE IT BY</p>
+      <p id="sc-break" style="font-size:22px;font-weight:500;color:#E8571A;line-height:1.35;margin:0;white-space:pre-line;"></p>
+    </div>
+
+    <!-- BOTTOM -->
+    <div>
+      <div style="height:1px;background:#1e1e1e;margin-bottom:16px;"></div>
+      <p style="font-size:11px;color:#333;margin:0;">thecyclebreaker.app</p>
+    </div>
+  </div>
+
+  <!-- ── PATTERNS ── -->
+  <section id="patterns" class="screen">
+    <div class="patterns-header">
+      <p class="screen-eyebrow">Weekly Patterns</p>
+      <h2 class="screen-title">Your week<br />in patterns.</h2>
+    </div>
+    <div id="pattern-content"></div>
+    <button class="btn-ghost" onclick="goHome()">← Back to Home</button>
+  </section>
+
+  <!-- ── BOTTOM NAV (shown on home + patterns) ── -->
+  <nav class="nav-bar" id="nav-bar">
+    <button class="nav-item" onclick="goHome()">
+      <i class="ti ti-home active" id="nav-home-icon"></i>
+      <span class="nav-lbl active" id="nav-home-lbl">Home</span>
+    </button>
+    <button class="nav-item" onclick="showPatterns()">
+      <i class="ti ti-chart-line" id="nav-patterns-icon"></i>
+      <span class="nav-lbl" id="nav-patterns-lbl">Patterns</span>
+    </button>
+    <button class="nav-item" onclick="alert('Profile coming soon.')">
+      <i class="ti ti-user"></i>
+      <span class="nav-lbl">Profile</span>
+    </button>
+  </nav>
+
+</div>
+
+<script>
+  /* ── CONSTANTS ── */
+  const TOTAL = 3;
+  let currentQ = 1;
+  const answers = {};
+
+  const ONE_MOVE_MAP = {
+    'A hard conversation I kept putting off': {
+      text: 'Send the first message. Three words: "Can we talk?" Before noon. The relief starts the second you hit send.',
+      target: 'Targets: conflict avoidance cycle',
+    },
+    'Taking action on something I already know': {
+      text: 'Set a 5-minute timer and begin. Not plan — begin. Momentum is built by moving, not by thinking about moving.',
+      target: 'Targets: knowledge-action gap',
+    },
+    'Sitting with an uncomfortable feeling': {
+      text: 'Find 60 seconds of quiet. Name the feeling out loud. Don\'t fix it — just face it. That\'s the whole move.',
+      target: 'Targets: emotional avoidance cycle',
+    },
+    'Being fully honest with myself': {
+      text: 'Open your notes app. Write one sentence you\'ve been afraid to admit. No one else sees it. You do.',
+      target: 'Targets: self-deception cycle',
+    },
+  };
+
+  const PATTERN_META = {
+    'A hard conversation I kept putting off': {
+      short: 'Avoiding hard conversations',
+      insight: 'You keep choosing short-term comfort over long-term clarity. The conversation you\'re dreading is the one that would free you most.',
+    },
+    'Taking action on something I already know': {
+      short: 'Knowing without doing',
+      insight: 'The gap between what you know and what you do is exactly where cycles live. You already have the answer — the pattern is not acting on it.',
+    },
+    'Sitting with an uncomfortable feeling': {
+      short: 'Escaping discomfort',
+      insight: 'Every time you exit a feeling early, it gets louder next time. The discomfort you keep running from is the one pointing at what matters.',
+    },
+    'Being fully honest with myself': {
+      short: 'Avoiding self-honesty',
+      insight: 'You\'re not lacking answers — you\'re avoiding the ones you already have. The truth you\'re hiding from yourself is where the real work starts.',
+    },
+  };
+
+  /* ── STORAGE HELPERS ── */
+  function getStreak()  { return parseInt(localStorage.getItem('cb_streak')  || '0', 10); }
+  function getTotal()   { return parseInt(localStorage.getItem('cb_total')   || '0', 10); }
+  function getCycles()  { return parseInt(localStorage.getItem('cb_cycles')  || '0', 10); }
+  function getLast()    { return localStorage.getItem('cb_last') || ''; }
+  function getHistory() { return JSON.parse(localStorage.getItem('cb_history') || '{}'); }
+
+  function yesterday() { return new Date(Date.now() - 86400000).toDateString(); }
+  function today()     { return new Date().toDateString(); }
+
+  /* ── ROUTING ── */
+  function goTo(id) {
+    const curr = document.querySelector('.screen.active');
+    const showNav = (id === 'home' || id === 'patterns');
+    document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
+    if (!curr) { document.getElementById(id).classList.add('active'); return; }
+    curr.classList.add('out');
+    setTimeout(() => {
+      curr.classList.remove('active', 'out');
+      document.getElementById(id).classList.add('active');
+      window.scrollTo({ top: 0 });
+    }, 200);
+  }
+
+  const BADGE_KEYWORD = {
+    'A hard conversation I kept putting off': 'hard conversations',
+    'Taking action on something I already know': 'taking action',
+    'Sitting with an uncomfortable feeling': 'sitting with discomfort',
+    'Being fully honest with myself': 'being honest with yourself',
+  };
+
+  function setNavActive(id) {
+    document.getElementById('nav-home-lbl').classList.toggle('active', id === 'home');
+    document.getElementById('nav-patterns-lbl').classList.toggle('active', id === 'patterns');
+    document.getElementById('nav-home-icon').classList.toggle('active', id === 'home');
+    document.getElementById('nav-patterns-icon').classList.toggle('active', id === 'patterns');
+  }
+
+  /* ── HOME ── */
+  function renderHome() {
+    const streak  = getStreak();
+    const cycles  = getCycles();
+    const history = getHistory();
+
+    document.getElementById('h-today-date').textContent = new Date().toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    });
+
+    document.getElementById('h-subline').textContent = streak > 0
+      ? `${streak} day${streak === 1 ? '' : 's'} in a row. Don't stop now.`
+      : `Day 1 starts now.`;
+
+    document.getElementById('h-stat-streak').textContent = streak;
+    document.getElementById('h-stat-cycles').textContent = cycles;
+
+    // 7-dot strip with Tabler icons
+    document.getElementById('h-dots').innerHTML = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i));
+      const done = !!history[d.toDateString()];
+      return `<div class="h-dot${done ? ' done' : ''}">
+        <i class="ti ${done ? 'ti-check' : 'ti-x'}"></i>
+      </div>`;
+    }).join('');
+
+    // pattern badge
+    const badge     = document.getElementById('h-badge');
+    const badgeText = document.getElementById('h-badge-text');
+    const weekKeys  = Object.keys(history).filter(k => (new Date() - new Date(k)) < 7 * 86400000);
+    if (weekKeys.length > 0) {
+      const tally = {};
+      weekKeys.forEach(k => { const e = history[k]; if (e && e.q1) tally[e.q1] = (tally[e.q1]||0)+1; });
+      const topKey  = Object.entries(tally).sort((a,b) => b[1]-a[1])[0][0];
+      const keyword = BADGE_KEYWORD[topKey] || topKey.toLowerCase();
+      badgeText.innerHTML = `You keep avoiding <strong>${keyword}</strong>.`;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+
+    setNavActive('home');
+  }
+
+  function goHome() {
+    resetMirror();
+    renderHome();
+    goTo('home');
+  }
+
+  /* ── MIRROR ── */
+  function resetMirror() {
+    currentQ = 1;
+    Object.keys(answers).forEach(k => delete answers[k]);
+    document.querySelectorAll('.question-block').forEach(b => b.classList.remove('active'));
+    document.getElementById('q1').classList.add('active');
+    document.querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+    document.querySelectorAll('.btn-next').forEach(b => b.classList.remove('enabled'));
+    updateProgress();
+  }
+
+  function mirrorBack() {
+    if (currentQ === 1) { goHome(); return; }
+    document.getElementById('q' + currentQ).classList.remove('active');
+    currentQ--;
+    document.getElementById('q' + currentQ).classList.add('active');
+    updateProgress();
+  }
+
+  function selectOption(btn, qId) {
+    btn.closest('.options').querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+    btn.classList.add('selected');
+    answers[qId] = btn.querySelector('span:first-child').textContent.trim();
+    document.getElementById('btn-next-' + currentQ).classList.add('enabled');
+  }
+
+  function updateProgress() {
+    document.getElementById('progress-fill').style.width = (currentQ / TOTAL * 100) + '%';
+    document.getElementById('q-counter').textContent = `Question ${currentQ} of ${TOTAL}`;
+  }
+
+  function nextQuestion() {
+    if (!answers['q' + currentQ]) return;
+    if (currentQ < TOTAL) {
+      document.getElementById('q' + currentQ).classList.remove('active');
+      currentQ++;
+      document.getElementById('q' + currentQ).classList.add('active');
+      updateProgress();
+    } else {
+      document.getElementById('progress-fill').style.width = '100%';
+      saveSession();
+      buildOneMove();
+      setTimeout(() => goTo('onemove'), 280);
+    }
+  }
+
+  /* ── ONE MOVE ── */
+  function buildOneMove() {
+    const q1  = answers['q1'] || '';
+    const map = ONE_MOVE_MAP[q1] || {
+      text:   'Pick one thing you said you\'d do — and do just the first step. Right now, before the feeling fades.',
+      target: 'Targets: avoidance cycle',
+    };
+    document.getElementById('move-card-text').textContent   = map.text;
+    document.getElementById('move-card-target').textContent = map.target;
+  }
+
+  function didIt() { goHome(); }
+
+  function remindMe() {
+    alert('Reminder feature coming soon.');
+  }
+
+  /* ── SESSION SAVE ── */
+  function saveSession() {
+    const t       = today();
+    const last    = getLast();
+    let streak    = getStreak();
+    let total     = getTotal();
+    let cycles    = getCycles();
+    const history = getHistory();
+
+    if (last !== t) {
+      total += 1;
+      if (last === yesterday()) {
+        streak += 1;
+      } else {
+        if (streak > 0) cycles += 1;
+        streak = 1;
+        if (cycles === 0) cycles = 1;
+      }
+      localStorage.setItem('cb_streak',  streak);
+      localStorage.setItem('cb_total',   total);
+      localStorage.setItem('cb_cycles',  cycles);
+      localStorage.setItem('cb_last',    t);
+      history[t] = { q1: answers['q1'], q2: answers['q2'], q3: answers['q3'] };
+      localStorage.setItem('cb_history', JSON.stringify(history));
+    }
+  }
+
+  /* ── PATTERNS ── */
+  function showPatterns() {
+    renderPatterns();
+    setNavActive('patterns');
+    goTo('patterns');
+  }
+
+  function last7Days() {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d;
+    });
+  }
+
+  function renderPatterns() {
+    const history = getHistory();
+    const days    = last7Days();
+    const el      = document.getElementById('pattern-content');
+    const done    = days.filter(d => history[d.toDateString()]);
+
+    if (done.length === 0) {
+      el.innerHTML = `<div class="pattern-empty"><strong>Nothing here yet.</strong><p>Complete your first Daily Mirror to start seeing your patterns.</p></div>`;
+      return;
+    }
+
+    const tally = {};
+    done.forEach(d => {
+      const e = history[d.toDateString()];
+      if (e && e.q1) tally[e.q1] = (tally[e.q1]||0)+1;
+    });
+    const sorted   = Object.entries(tally).sort((a,b) => b[1]-a[1]);
+    const topKey   = sorted[0][0];
+    const topMeta  = PATTERN_META[topKey] || { short: topKey, insight: '' };
+    const maxCount = sorted[0][1];
+
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const grid = days.map(d => {
+      const isDone = !!history[d.toDateString()];
+      return `<div class="week-cell${isDone ? ' done' : ''}">
+        <span class="wc-name">${dayNames[d.getDay()]}</span>
+        <span class="wc-pip"></span>
+      </div>`;
+    }).join('');
+
+    const bars = sorted.map(([key, count]) => {
+      const pct   = Math.round(count / maxCount * 100);
+      const label = PATTERN_META[key] ? PATTERN_META[key].short : key;
+      return `<div class="breakdown-item">
+        <div class="breakdown-bar-row">
+          <span class="breakdown-name">${label}</span>
+          <span class="breakdown-count">${count}×</span>
+        </div>
+        <div class="breakdown-bar-bg">
+          <div class="breakdown-bar-fill" style="width:0%" data-w="${pct}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="pattern-top">
+        <p class="pattern-top-label">Most Avoided This Week</p>
+        <p class="pattern-top-name">${topMeta.short}</p>
+        <p class="pattern-top-insight">${topMeta.insight}</p>
+      </div>
+      <p class="section-label">This Week</p>
+      <div class="week-grid">${grid}</div>
+      <p class="section-label">Full Breakdown</p>
+      <div class="breakdown-list">${bars}</div>
+    `;
+
+    requestAnimationFrame(() => {
+      el.querySelectorAll('.breakdown-bar-fill').forEach(b => {
+        requestAnimationFrame(() => { b.style.width = b.dataset.w; });
+      });
+    });
+  }
+
+  /* ── SHARE CARD ── */
+  const SHARE_Q1 = {
+    'A hard conversation I kept putting off':      'avoided hard conversations',
+    'Taking action on something I already know':   'avoided taking action I already knew I needed to',
+    'Sitting with an uncomfortable feeling':       'avoided sitting with discomfort',
+    'Being fully honest with myself':              'avoided being honest with myself',
+  };
+
+  const SHARE_Q2 = {
+    'Procrastinating until it felt too late': 'things pile up',
+    'Doubting myself before I even started':  'doubt kicks in',
+    'Choosing distraction over presence':     'I reach for distraction',
+    'Saying yes when I meant no':             'I say yes instead of no',
+  };
+
+  function buildShareCard() {
+    const q1       = answers['q1'] || '';
+    const q2       = answers['q2'] || '';
+    const q3       = answers['q3'] || '';
+    const streak   = getStreak();
+    const avoided  = SHARE_Q1[q1] || q1.toLowerCase();
+    const pattern  = SHARE_Q2[q2] || q2.toLowerCase();
+    const quote    = `I ${avoided} every time ${pattern}.`;
+    const breakTxt = `${q3}\n${streak} day${streak === 1 ? '' : 's'} running.`;
+
+    document.getElementById('sc-quote').textContent = quote;
+    document.getElementById('sc-break').textContent = breakTxt;
+  }
+
+  async function shareExpose() {
+    buildShareCard();
+    const card = document.getElementById('share-card');
+    const btn  = document.querySelector('.btn-share');
+
+    btn.textContent = 'Generating…';
+    btn.style.pointerEvents = 'none';
+
+    try {
+      const canvas = await html2canvas(card, {
+        width:      1080,
+        height:     1920,
+        scale:      1,
+        useCORS:    true,
+        backgroundColor: '#0f0f0f',
+        logging:    false,
+      });
+
+      canvas.toBlob(async (blob) => {
+        const file = new File([blob], 'my-cycle-expose.png', { type: 'image/png' });
+
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files:  [file],
+            title:  'My Cycle Exposé',
+          });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a   = document.createElement('a');
+          a.href     = url;
+          a.download = 'my-cycle-expose.png';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }, 'image/png');
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('Could not generate share card. Try again.');
+    } finally {
+      btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:#E8571A;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Share your exposé`;
+      btn.style.pointerEvents = 'auto';
+    }
+  }
+
+  /* ── VOICE NOTE ── */
+  function voiceNote() { alert('Voice note feature coming soon.'); }
+
+  /* ── INIT ── */
+  renderHome();
+  document.getElementById('nav-bar').style.display = 'flex';
+  updateProgress();
+</script>
+</body>
+</html>

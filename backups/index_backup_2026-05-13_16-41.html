@@ -1,0 +1,2990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>The Cycle Breaker</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cycle Breaker">
+  <meta name="theme-color" content="#0f0f0f">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(() => console.log('SW registered'))
+        .catch(err => console.log('SW failed', err));
+    }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; max-width: 100%; }
+
+    html, body {
+      overflow: hidden;
+      max-width: 100vw;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg:         #0f0f0f;
+      --surface:    #1a1a1a;
+      --border:     #2a2a2a;
+      --text:       #f0f0f0;
+      --muted:      #555;
+      --muted2:     #888;
+      --accent:     #E8571A;
+      --accent-bg:  #1e1410;
+      --r-card:     12px;
+      --r-btn:      14px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      justify-content: center;
+    }
+
+    #app {
+      width: 100%;
+      max-width: 480px;
+      position: relative;
+    }
+
+    /* ── TRANSITIONS ── */
+    .screen {
+      display: none;
+      flex-direction: column;
+      padding: 28px 20px 100px;
+      min-height: 100dvh;
+    }
+    .screen.active {
+      display: flex;
+      animation: fadeUp 0.32s cubic-bezier(0.22,1,0.36,1) both;
+    }
+    .screen.out {
+      display: flex !important;
+      animation: fadeDown 0.2s ease forwards;
+      pointer-events: none;
+    }
+    @keyframes fadeUp   { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
+    @keyframes fadeDown { from { opacity:1 } to { opacity:0; transform:translateY(-8px) } }
+
+    /* ── BUTTON PRESS FEEDBACK ── */
+    * { -webkit-tap-highlight-color: transparent; }
+    .btn-pressable {
+      transition: transform 80ms ease-in, opacity 80ms ease-in, box-shadow 80ms ease-in;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      cursor: pointer;
+      transform-origin: center;
+    }
+    .btn-pressable:active {
+      transform: scale(0.94);
+      opacity: 0.85;
+    }
+    .btn-pressable-release {
+      transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 150ms ease-out;
+    }
+    .btn-pressable-card:active {
+      transform: scale(0.96);
+      opacity: 0.9;
+      transition: transform 80ms ease-in, opacity 80ms ease-in;
+    }
+    .btn-pressable-nav:active {
+      transform: scale(0.88);
+      transition: transform 80ms ease-in;
+    }
+
+    /* ── SCREEN SLIDE TRANSITIONS ── */
+    @keyframes slideInFromRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    @keyframes slideOutToLeft   { from { transform: translateX(0); }    to { transform: translateX(-100%); } }
+    @keyframes slideInFromLeft  { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+    @keyframes slideOutToRight  { from { transform: translateX(0); }    to { transform: translateX(100%); } }
+    /* Higher specificity (0,3,0) overrides .screen.active fadeUp (0,2,0) when slide class is present */
+    .screen.active.slide-in-right  { animation: slideInFromRight 320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+    .screen.active.slide-in-left   { animation: slideInFromLeft  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+    .screen.active.slide-out-left  { animation: slideOutToLeft   320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+    .screen.active.slide-out-right { animation: slideOutToRight  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+
+    /* ── BOTTOM NAV ── */
+    .nav-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-around;
+      padding: 10px 20px 20px;
+      border-top: 0.5px solid #1e1e1e;
+      background: #0f0f0f;
+      z-index: 100;
+      box-sizing: border-box;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    .nav-icon { font-size: 20px; }
+    .nav-lbl {
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .nav-lbl.active { color: var(--accent); }
+
+    /* ── HOME SCREEN ── */
+    #home { gap: 0; }
+
+    .app-name {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .date-line {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    .hero-text {
+      font-size: clamp(20px, 5.5vw, 26px);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.28;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .sub-text {
+      font-size: 13px;
+      color: var(--muted2);
+      line-height: 1.55;
+      margin-bottom: 28px;
+    }
+
+    /* 3-stat row */
+    .streak-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .streak-card {
+      flex: 1;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 12px 10px;
+      text-align: center;
+    }
+    .streak-val {
+      font-size: 22px;
+      font-weight: 500;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .streak-lbl {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* 7-dot week strip */
+    .dots-row {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 16px;
+      justify-content: center;
+    }
+    .dot {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      background: #1a1a1a;
+      border: 0.5px solid var(--border);
+      flex: 1;
+    }
+    .dot.done { background: var(--accent-bg); border-color: var(--accent); }
+    .dot-day { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    .dot.done .dot-day { color: var(--accent); }
+    .dot-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+    .dot.done .dot-pip { background: var(--accent); }
+
+    /* Pattern badge */
+    .pattern-badge {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .badge-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+    .badge-text { font-size: 12px; color: var(--muted2); line-height: 1.45; }
+    .badge-text strong { color: #ccc; font-weight: 500; }
+
+    /* CTA */
+    .cta-btn {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-btn);
+      padding: 16px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+      margin-bottom: 10px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .cta-btn:hover  { opacity: 0.9; }
+    .cta-btn:active { transform: scale(0.98); }
+
+    .secondary-row { display: flex; gap: 8px; }
+    .sec-btn {
+      flex: 1;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 12px 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px;
+      color: var(--muted2);
+      cursor: pointer;
+      text-align: center;
+      line-height: 1.5;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .sec-btn:hover { border-color: #444; color: var(--text); }
+    .sec-icon { font-size: 16px; display: block; margin-bottom: 3px; }
+
+    /* ── MIRROR SCREEN ── */
+    #mirror { gap: 0; }
+
+    .mirror-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .back-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      color: var(--muted2);
+      font-size: 18px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+    }
+    .back-btn svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .q-counter { display: none; }
+
+    .q-dots {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+    .q-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #2a2a2a;
+      transition: background 0.2s, width 0.2s;
+      flex-shrink: 0;
+    }
+    .q-dot.active {
+      background: var(--accent);
+      width: 8px;
+      height: 8px;
+    }
+
+    /* Mirror custom "Let me type it" input */
+    .mirror-custom-reveal {
+      max-height: 0;
+      overflow: hidden;
+      opacity: 0;
+      transition: max-height 200ms ease, opacity 200ms ease;
+    }
+    .mirror-custom-reveal.visible {
+      max-height: 80px;
+      opacity: 1;
+    }
+    .mirror-custom-input {
+      width: 100%;
+      background: #1a1a1a;
+      border: 0.5px solid var(--accent);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      color: #f0f0f0;
+      margin-top: 8px;
+      box-sizing: border-box;
+      outline: none;
+    }
+    .mirror-custom-input::placeholder { color: #444; }
+
+    .progress-bar {
+      height: 2px;
+      background: #1e1e1e;
+      border-radius: 2px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.45s cubic-bezier(0.22,1,0.36,1);
+    }
+
+    .question-block { display: none; flex-direction: column; }
+    .question-block.active {
+      display: flex;
+      animation: fadeUp 0.3s cubic-bezier(0.22,1,0.36,1) both;
+    }
+
+    .q-text {
+      font-size: clamp(18px, 5vw, 21px);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.3;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+    .q-hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .options { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+
+    .option {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 18px;
+      min-height: 64px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      color: var(--muted2);
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+      line-height: 1.4;
+    }
+    .option:hover { border-color: #444; color: var(--text); }
+    .option.selected {
+      background: var(--accent-bg);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .option-check {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      opacity: 0;
+      margin-left: 10px;
+    }
+    .option.selected .option-check { opacity: 1; }
+    .option-check svg {
+      width: 16px; height: 16px;
+      stroke: var(--accent);
+      stroke-width: 2.5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .btn-next {
+      width: 100%;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-btn);
+      padding: 15px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      opacity: 0.3;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn-next.enabled { opacity: 1; pointer-events: auto; }
+    .btn-next:active { transform: scale(0.98); }
+
+    /* ── ONE MOVE SCREEN ── */
+    #onemove {
+      align-items: center;
+      text-align: center;
+      justify-content: flex-start;
+      padding-top: 60px;
+      min-height: calc(100dvh - 100px);
+    }
+
+    @keyframes sonarPulse {
+      0%   { transform: scale(1);   opacity: 0.6; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    .bolt-icon {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: var(--accent-bg);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .bolt-icon::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      animation: sonarPulse 2s ease-out infinite;
+    }
+
+    .showed-up {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .onemove-title {
+      font-size: clamp(20px, 5.5vw, 24px);
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+      margin-bottom: 6px;
+    }
+
+    .onemove-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    .move-card {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 18px;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 20px;
+    }
+
+    .move-card-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+
+    .move-card-text {
+      font-size: 17px;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.4;
+      margin-bottom: 12px;
+    }
+
+    .move-card-target {
+      font-size: 11px;
+      color: var(--muted);
+      border-top: 0.5px solid var(--border);
+      padding-top: 10px;
+    }
+
+    .move-actions { display: flex; gap: 10px; width: 100%; }
+
+    .btn-did-it {
+      flex: 1;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-card);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn-did-it:hover  { opacity: 0.9; }
+    .btn-did-it:active { transform: scale(0.97); }
+
+    .btn-remind {
+      flex: 1;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px;
+      color: var(--muted2);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-remind:hover { border-color: #444; color: var(--text); }
+
+    /* ── PATTERNS SCREEN ── */
+    #patterns { gap: 0; }
+
+    .patterns-header { margin-bottom: 28px; }
+
+    .screen-eyebrow {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .screen-title {
+      font-size: clamp(22px, 6vw, 28px);
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+
+    .pattern-top {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+    .pattern-top-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .pattern-top-name {
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+    .pattern-top-insight {
+      font-size: 13px;
+      color: var(--muted2);
+      line-height: 1.6;
+      border-top: 0.5px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      margin-top: 6px;
+    }
+
+    .week-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+      margin-bottom: 24px;
+    }
+    .week-cell {
+      aspect-ratio: 1;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+    }
+    .week-cell.done { background: var(--accent-bg); border-color: var(--accent); }
+    .wc-name { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+    .week-cell.done .wc-name { color: var(--accent); }
+    .wc-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+    .week-cell.done .wc-pip { background: var(--accent); }
+
+    .breakdown-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+    .breakdown-item {
+      background: var(--surface);
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-card);
+      padding: 12px 16px;
+    }
+    .breakdown-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+    .breakdown-name { font-size: 12px; font-weight: 500; flex: 1; line-height: 1.3; }
+    .breakdown-count { font-size: 12px; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+    .breakdown-bar-bg { height: 3px; background: var(--border); border-radius: 100px; overflow: hidden; }
+    .breakdown-bar-fill { height: 100%; background: var(--accent); border-radius: 100px; transition: width 0.6s cubic-bezier(0.22,1,0.36,1); }
+
+    .pattern-empty { text-align: center; padding: 48px 24px; }
+    .pattern-empty strong { display: block; font-size: 17px; font-weight: 500; margin-bottom: 8px; }
+    .pattern-empty p { font-size: 13px; color: var(--muted2); line-height: 1.6; }
+
+    .btn-ghost {
+      width: 100%;
+      background: transparent;
+      border: 0.5px solid var(--border);
+      border-radius: var(--r-btn);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted2);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-ghost:hover { border-color: #444; color: var(--text); }
+
+    .btn-share {
+      width: 100%;
+      margin-top: 10px;
+      background: #1a1a1a;
+      border: 1px solid var(--accent);
+      border-radius: var(--r-btn);
+      padding: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--accent);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn-share:hover  { opacity: 0.85; }
+    .btn-share:active { transform: scale(0.98); }
+    .btn-share svg {
+      width: 16px; height: 16px;
+      stroke: var(--accent);
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+
+    /* ── HOME SCREEN (rebuilt) ── */
+    #home {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      height: -webkit-fill-available;
+      overflow: hidden;
+      background: #0f0f0f;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      gap: 0;
+      padding: 0;
+    }
+    .home-scroll-wrapper {
+      height: 100dvh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding: 52px 20px 90px 20px;
+      box-sizing: border-box;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .home-scroll-wrapper::-webkit-scrollbar {
+      display: none;
+    }
+    .h-appname {
+      font-size: 11px;
+      font-weight: 500;
+      color: #E8571A;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+    .h-date {
+      font-size: 11px;
+      color: #555;
+      margin-bottom: 20px;
+    }
+    .h-headline {
+      font-size: 26px;
+      font-weight: 500;
+      color: #f0f0f0;
+      line-height: 1.25;
+      margin-bottom: 8px;
+    }
+    .h-subline {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 28px;
+    }
+    .h-stat-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 28px;
+    }
+    .h-stat-card {
+      flex: 1;
+      background: #1a1a1a;
+      border: 0.5px solid #222;
+      border-radius: 12px;
+      padding: 16px 12px;
+      text-align: center;
+    }
+    .h-stat-val {
+      font-size: 28px;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .h-dots {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .h-dot {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: #141414;
+      border: 0.5px solid #1e1e1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .h-dot.done {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: #E8571A;
+      border: none;
+      box-shadow: 0 0 8px rgba(232, 87, 26, 0.5);
+    }
+    .h-dot .ti {
+      font-size: 10px;
+      color: #2a2a2a;
+    }
+    .h-dot.done .ti {
+      font-size: 12px;
+      color: #fff;
+      font-weight: 600;
+    }
+    .h-encourage {
+      font-size: 12px;
+      color: #444;
+      line-height: 1.5;
+      text-align: center;
+      margin-top: 10px;
+      margin-bottom: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+    .h-badge {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: #1a1a1a;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-bottom: 16px;
+    }
+    .h-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #E8571A;
+      flex-shrink: 0;
+    }
+    .h-badge-text {
+      font-size: 12px;
+      color: #888;
+      line-height: 1.4;
+    }
+    .h-badge-text strong {
+      color: #ccc;
+      font-weight: 500;
+    }
+    .h-cta {
+      width: 100%;
+      background: #E8571A;
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      padding: 16px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .h-cta:hover  { opacity: 0.9; }
+    .h-cta:active { transform: scale(0.98); }
+    .h-sec-row {
+      display: flex;
+      gap: 8px;
+    }
+    .h-sec-btn {
+      flex: 1;
+      background: #1a1a1a;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 12px 8px;
+      font-family: inherit;
+      font-size: 11px;
+      color: #666;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .h-sec-btn:hover { border-color: #444; color: #aaa; }
+    .h-sec-btn .ti {
+      font-size: 14px;
+      display: block;
+      margin-bottom: 3px;
+    }
+    /* Home completion card */
+    .h-complete-card {
+      display: none;
+      flex-direction: column;
+      background: #1a1a1a;
+      border: 0.5px solid #E8571A;
+      border-radius: 14px;
+      padding: 20px 18px;
+      margin-bottom: 12px;
+    }
+    .h-complete-card.visible { display: flex; }
+    .h-complete-label {
+      font-size: 10px;
+      color: #E8571A;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .h-complete-day {
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 14px;
+    }
+    .h-complete-move-label {
+      font-size: 10px;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .h-complete-move-text {
+      font-size: 14px;
+      font-weight: 500;
+      color: #f0f0f0;
+      line-height: 1.45;
+      margin-bottom: 14px;
+    }
+    .h-complete-tomorrow {
+      font-size: 12px;
+      color: #444;
+      padding-top: 12px;
+      border-top: 0.5px solid #2a2a2a;
+    }
+    .h-countdown {
+      font-size: 11px;
+      color: #333;
+      margin-top: 4px;
+    }
+
+    /* Nav bar Tabler icon styles */
+    .nav-bar {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+    .nav-item .ti {
+      font-size: 20px;
+      color: #444;
+      display: block;
+    }
+    .nav-item .ti.active { color: #E8571A; }
+
+    /* ── ONBOARDING ── */
+    .ob-container {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #0f0f0f;
+      z-index: 1000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+    .ob-track {
+      display: flex;
+      height: 100%;
+      will-change: transform;
+      transition: transform 280ms ease-in-out;
+    }
+    .ob-screen {
+      width: 100vw;
+      min-width: 100vw;
+      height: 100%;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding: 0 24px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+    .ob-screen-header { padding-top: 52px; }
+    .ob-appname {
+      font-size: 11px;
+      color: #E8571A;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      margin: 0;
+    }
+    .ob-back {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+    }
+    .ob-back .ti { font-size: 18px; color: #555; }
+    .ob-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .ob-footer {
+      margin-top: auto;
+      padding: 24px 0 40px;
+    }
+    /* Screen 1 */
+    .ob-s1-headline {
+      font-size: 28px;
+      font-weight: 500;
+      color: #f0f0f0;
+      line-height: 1.25;
+      max-width: 280px;
+      text-align: center;
+      margin: 0 0 16px;
+    }
+    .ob-s1-body {
+      font-size: 14px;
+      color: #555;
+      line-height: 1.6;
+      max-width: 260px;
+      text-align: center;
+      margin: 0;
+    }
+    /* Screen 2 */
+    .ob-s2-top { padding-top: 32px; }
+    .ob-s2-label {
+      font-size: 11px;
+      color: #E8571A;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin: 0 0 12px;
+    }
+    .ob-s2-question {
+      font-size: 24px;
+      font-weight: 500;
+      color: #f0f0f0;
+      line-height: 1.3;
+      margin: 0 0 8px;
+    }
+    .ob-s2-subline {
+      font-size: 13px;
+      color: #555;
+      margin: 0 0 32px;
+    }
+    .ob-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ob-option {
+      width: 100%;
+      background: #1a1a1a;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 16px 18px;
+      font-family: inherit;
+      font-size: 14px;
+      color: #888;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-align: left;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+    .ob-option.ob-selected {
+      background: #1e1410;
+      border-color: #E8571A;
+      color: #f0f0f0;
+    }
+    .ob-check { font-size: 14px; color: #E8571A; opacity: 0; flex-shrink: 0; }
+    .ob-option.ob-selected .ob-check { opacity: 1; }
+    /* Screen 3 */
+    .ob-s3-bell { font-size: 40px; color: #E8571A; margin-bottom: 20px; display: block; }
+    .ob-s3-headline {
+      font-size: 26px;
+      font-weight: 500;
+      color: #f0f0f0;
+      text-align: center;
+      margin: 0 0 10px;
+    }
+    .ob-s3-body {
+      font-size: 14px;
+      color: #555;
+      line-height: 1.6;
+      max-width: 260px;
+      text-align: center;
+      margin: 0 0 32px;
+    }
+    .ob-features {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 300px;
+    }
+    .ob-feature-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .ob-feature-row .ti { font-size: 16px; color: #E8571A; flex-shrink: 0; margin-top: 1px; }
+    .ob-feature-row span { font-size: 13px; color: #888; line-height: 1.5; }
+    /* Shared buttons */
+    .ob-btn-primary {
+      width: 100%;
+      background: #E8571A;
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      padding: 16px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: opacity 0.15s;
+    }
+    .ob-btn-primary:active { opacity: 0.85; }
+    .ob-btn-primary.ob-disabled {
+      background: #1a1a1a;
+      color: #444;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .ob-btn-skip {
+      width: 100%;
+      background: transparent;
+      border: none;
+      font-family: inherit;
+      font-size: 13px;
+      color: #444;
+      cursor: pointer;
+      text-align: center;
+      padding: 10px;
+    }
+    .ob-fine {
+      font-size: 11px;
+      color: #333;
+      text-align: center;
+      margin: 0;
+    }
+
+    /* ── SETTINGS SCREEN ── */
+    #settings {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      gap: 0;
+    }
+    .s-header {
+      font-size: 11px;
+      color: #E8571A;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      margin-bottom: 32px;
+    }
+    .s-section-label {
+      font-size: 11px;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 12px;
+    }
+    .s-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 0;
+      border-bottom: 0.5px solid #1e1e1e;
+    }
+    .s-row-left { flex: 1; min-width: 0; }
+    .s-row-title { font-size: 14px; color: #f0f0f0; margin-bottom: 3px; }
+    .s-row-sub { font-size: 12px; color: #555; line-height: 1.45; }
+    .s-ios-note { font-size: 12px; color: #555; margin-top: 8px; line-height: 1.5; display: none; }
+    .toggle-wrap { position: relative; width: 44px; height: 26px; flex-shrink: 0; cursor: pointer; display: inline-block; }
+    .toggle-input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-slider { position: absolute; inset: 0; background: #2a2a2a; border-radius: 26px; transition: background 0.2s; }
+    .toggle-slider::before { content: ''; position: absolute; width: 20px; height: 20px; background: #f0f0f0; border-radius: 50%; top: 3px; left: 3px; transition: transform 0.2s; }
+    .toggle-input:checked + .toggle-slider { background: #E8571A; }
+    .toggle-input:checked + .toggle-slider::before { transform: translateX(18px); }
+    .s-select { background: #1a1a1a; border: 0.5px solid #2a2a2a; border-radius: 8px; color: #f0f0f0; padding: 8px 10px; font-size: 12px; font-family: inherit; flex-shrink: 0; max-width: 120px; }
+    .s-reset-btn { background: transparent; border: 0.5px solid #E8571A; color: #E8571A; border-radius: 8px; padding: 6px 14px; font-size: 12px; font-family: inherit; cursor: pointer; flex-shrink: 0; transition: opacity 0.15s; }
+    .s-reset-btn:active { opacity: 0.7; }
+    .s-confirm-box { padding: 16px 0 8px; }
+    .s-confirm-text { font-size: 13px; color: #888; margin-bottom: 12px; }
+    .s-confirm-row { display: flex; gap: 10px; }
+    .s-confirm-yes { flex: 1; background: #E8571A; border: none; border-radius: 10px; padding: 10px; font-family: inherit; font-size: 13px; color: #fff; cursor: pointer; }
+    .s-confirm-no  { flex: 1; background: #1a1a1a; border: 0.5px solid #2a2a2a; border-radius: 10px; padding: 10px; font-family: inherit; font-size: 13px; color: #888; cursor: pointer; }
+
+    /* ── VOICE NOTE — ONE MOVE RECORDING ── */
+    .vn-section { width: 100%; margin-top: 16px; text-align: center; }
+    .vn-label {
+      font-size: 11px;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+    .vn-subline { font-size: 12px; color: #333; margin-bottom: 16px; }
+    .vn-record-btn {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: #1a1a1a;
+      border: 1.5px solid #2a2a2a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+      cursor: pointer;
+      position: relative;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: none;
+    }
+    .vn-record-btn .ti { font-size: 28px; color: #555; transition: color 0.15s; }
+    .vn-record-btn.recording { background: #1e1410; border-color: #E8571A; }
+    .vn-record-btn.recording .ti { color: #E8571A; }
+    .vn-record-btn.recording::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid #E8571A;
+      animation: sonarPulse 1.5s ease-out infinite;
+    }
+    .vn-countdown { font-size: 14px; color: #E8571A; text-align: center; margin-top: 12px; min-height: 20px; }
+    .vn-error { font-size: 11px; color: #E8571A; text-align: center; margin-top: 8px; }
+    .vn-saved {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #888;
+      text-align: center;
+      padding-top: 4px;
+    }
+    .vn-saved .ti { font-size: 13px; color: #E8571A; }
+    .vn-already { font-size: 12px; color: #444; text-align: center; margin-top: 16px; }
+
+    /* ── VOICE NOTE — HOME PLAYBACK CARD ── */
+    .vn-tooltip {
+      font-size: 11px;
+      color: #333;
+      text-align: center;
+      margin-top: 6px;
+      opacity: 0;
+      transition: opacity 200ms ease;
+      min-height: 0;
+    }
+    /* ── VOICE NOTE — PLAYBACK BOTTOM SHEET ── */
+    .vn-sheet-backdrop {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6);
+      z-index: 200;
+    }
+    .vn-sheet {
+      position: fixed;
+      bottom: 0; left: 0;
+      width: 100%;
+      background: #111;
+      border-radius: 20px 20px 0 0;
+      border-top: 0.5px solid #2a2a2a;
+      padding: 20px 20px 40px;
+      box-sizing: border-box;
+      z-index: 201;
+      transform: translateY(100%);
+      transition: transform 300ms ease-out;
+    }
+    .vn-sheet.open { transform: translateY(0); }
+    .vn-sheet-handle {
+      width: 36px;
+      height: 4px;
+      background: #2a2a2a;
+      border-radius: 2px;
+      margin: 0 auto 16px;
+      display: block;
+    }
+    .vn-sheet-top { display: flex; justify-content: space-between; align-items: center; }
+    .vn-sheet-label { font-size: 10px; color: #E8571A; text-transform: uppercase; letter-spacing: 0.08em; }
+    .vn-sheet-close { background: none; border: none; cursor: pointer; padding: 2px; display: flex; align-items: center; }
+    .vn-sheet-close .ti { font-size: 16px; color: #444; }
+    .vn-waveform { display: flex; align-items: center; gap: 3px; }
+    .vn-bar { width: 3px; border-radius: 2px; background: #E8571A; }
+    .vn-sheet-controls { display: flex; align-items: center; justify-content: space-between; }
+    .vn-sheet-play-btn {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: #E8571A;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    .vn-sheet-play-btn:active { opacity: 0.8; }
+    .vn-sheet-play-btn .ti { font-size: 16px; color: #fff; }
+    .vn-sheet-date { font-size: 11px; color: #444; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── ONBOARDING ── -->
+  <div id="ob-container" class="ob-container">
+    <div id="ob-track" class="ob-track">
+
+      <!-- Screen 1: The Hook -->
+      <div class="ob-screen">
+        <div class="ob-screen-header">
+          <p class="ob-appname">THE CYCLE BREAKER</p>
+        </div>
+        <div class="ob-center">
+          <h1 class="ob-s1-headline">Most people run the same day on repeat.</h1>
+          <p class="ob-s1-body">Not because they don't care. Because nobody ever showed them what their cycle actually looks like.</p>
+        </div>
+        <div class="ob-footer">
+          <button class="ob-btn-primary btn-pressable" onclick="obGoTo(1)">That's me — let's change it</button>
+          <p class="ob-fine">No account needed. Takes 60 seconds.</p>
+        </div>
+      </div>
+
+      <!-- Screen 2: The One Question -->
+      <div class="ob-screen">
+        <div class="ob-screen-header">
+          <button class="ob-back btn-pressable" onclick="obGoTo(0)"><i class="ti ti-arrow-left"></i></button>
+        </div>
+        <div class="ob-s2-top">
+          <p class="ob-s2-label">QUICK SETUP</p>
+          <h2 class="ob-s2-question">What do you keep putting off?</h2>
+          <p class="ob-s2-subline">Be honest. This is just for you.</p>
+          <div class="ob-options">
+            <button class="ob-option btn-pressable-card" onclick="ob2Select(this, 0)">
+              <span>Creating content</span>
+              <i class="ti ti-check ob-check"></i>
+            </button>
+            <button class="ob-option btn-pressable-card" onclick="ob2Select(this, 1)">
+              <span>Having hard conversations</span>
+              <i class="ti ti-check ob-check"></i>
+            </button>
+            <button class="ob-option btn-pressable-card" onclick="ob2Select(this, 2)">
+              <span>Going outside and moving</span>
+              <i class="ti ti-check ob-check"></i>
+            </button>
+            <button class="ob-option btn-pressable-card" onclick="ob2Select(this, 3)">
+              <span>Starting the work I keep delaying</span>
+              <i class="ti ti-check ob-check"></i>
+            </button>
+          </div>
+        </div>
+        <div class="ob-footer">
+          <button class="ob-btn-primary ob-disabled btn-pressable" id="ob-s2-btn" onclick="ob2Confirm()">This is mine</button>
+        </div>
+      </div>
+
+      <!-- Screen 3: Notification Permission -->
+      <div class="ob-screen">
+        <div class="ob-screen-header">
+          <button class="ob-back btn-pressable" onclick="obGoTo(1)"><i class="ti ti-arrow-left"></i></button>
+        </div>
+        <div class="ob-center">
+          <i class="ti ti-bell ob-s3-bell"></i>
+          <p class="ob-s3-headline">One message a day.</p>
+          <p class="ob-s3-body">No spam. No guilt trips. Just a nudge when you're about to let your cycle win.</p>
+          <div class="ob-features">
+            <div class="ob-feature-row">
+              <i class="ti ti-check"></i>
+              <span>Timed to when you usually slip</span>
+            </div>
+            <div class="ob-feature-row">
+              <i class="ti ti-check"></i>
+              <span>Pulls from your actual pattern — not generic reminders</span>
+            </div>
+            <div class="ob-feature-row">
+              <i class="ti ti-check"></i>
+              <span>Turn it off anytime in settings</span>
+            </div>
+          </div>
+        </div>
+        <div class="ob-footer">
+          <button class="ob-btn-primary btn-pressable" onclick="obRequestNotifications()">Turn on notifications</button>
+          <button class="ob-btn-skip btn-pressable" onclick="obComplete()">Skip for now</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── HOME ── -->
+  <section id="home" class="screen active">
+    <div class="home-scroll-wrapper">
+      <p class="h-appname">THE CYCLE BREAKER</p>
+      <p class="h-date" id="h-today-date"></p>
+      <p class="h-headline">Stop running the same day twice.</p>
+      <p class="h-subline" id="h-subline"></p>
+
+      <div class="h-stat-row">
+        <div class="h-stat-card">
+          <div class="h-stat-val" id="h-stat-streak" style="color:#E8571A">0</div>
+        </div>
+        <div class="h-stat-card">
+          <div class="h-stat-val" id="h-stat-cycles" style="color:#2a2a2a">0</div>
+        </div>
+      </div>
+
+      <div class="h-dots" id="h-dots"></div>
+      <p class="h-encourage" id="h-encourage"></p>
+
+      <div class="h-badge btn-pressable-card" id="h-badge">
+        <span class="h-badge-dot"></span>
+        <span class="h-badge-text" id="h-badge-text"></span>
+      </div>
+
+      <div class="h-complete-card btn-pressable-card" id="h-complete-card">
+        <span class="h-complete-label">Mirror complete</span>
+        <span class="h-complete-day" id="h-complete-day">Day 0</span>
+        <span class="h-complete-move-label">TODAY'S MOVE</span>
+        <span class="h-complete-move-text" id="h-complete-move-text"></span>
+        <span class="h-complete-tomorrow">Come back tomorrow.</span>
+        <span class="h-countdown" id="h-countdown"></span>
+      </div>
+
+      <button class="h-cta btn-pressable" id="h-cta-btn" onclick="navigateTo('mirror','home','forward')">Start today's mirror</button>
+
+      <div class="h-sec-row">
+        <button class="h-sec-btn btn-pressable" onclick="showPatterns()">
+          <i class="ti ti-chart-bar"></i>Weekly reveal
+        </button>
+        <button class="h-sec-btn btn-pressable" id="vn-home-btn" onclick="voiceNote()">
+          <i class="ti ti-microphone"></i>Voice note
+        </button>
+      </div>
+      <p class="vn-tooltip" id="vn-tooltip"></p>
+    </div>
+  </section>
+
+  <!-- ── MIRROR ── -->
+  <section id="mirror" class="screen">
+    <div class="mirror-top">
+      <button class="back-btn btn-pressable" onclick="mirrorBack()">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <span class="q-counter" id="q-counter">Question 1 of 3</span>
+    </div>
+
+    <div class="q-dots" id="q-dots">
+      <span class="q-dot active"></span>
+      <span class="q-dot"></span>
+      <span class="q-dot"></span>
+    </div>
+
+    <div class="progress-bar" style="display:none">
+      <div class="progress-fill" id="progress-fill" style="width:33%"></div>
+    </div>
+
+    <p id="mirror-day1-banner" style="display:none;font-size:12px;color:#E8571A;text-align:center;margin-bottom:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;">Day 1. Let's see what you've been avoiding.</p>
+
+    <div class="question-block active" id="q1">
+      <p class="q-text">What did you avoid doing yesterday?</p>
+      <p class="q-hint">Be honest. Nobody's watching.</p>
+      <div class="options" id="q1-options"></div>
+      <div class="mirror-custom-reveal" id="q1-custom-reveal">
+        <input class="mirror-custom-input" id="q1-custom-input" type="text"
+          placeholder="What did you actually avoid?"
+          oninput="customTyped(this,'q1')" />
+      </div>
+      <button class="btn-next btn-pressable" id="btn-next-1" onclick="nextQuestion()">Next question</button>
+    </div>
+
+    <div class="question-block" id="q2">
+      <p class="q-text">What pattern kept showing up?</p>
+      <p class="q-hint">Be honest. Nobody's watching.</p>
+      <div class="options" id="q2-options"></div>
+      <div class="mirror-custom-reveal" id="q2-custom-reveal">
+        <input class="mirror-custom-input" id="q2-custom-input" type="text"
+          placeholder="What pattern kept showing up?"
+          oninput="customTyped(this,'q2')" />
+      </div>
+      <button class="btn-next btn-pressable" id="btn-next-2" onclick="nextQuestion()">Next question</button>
+    </div>
+
+    <div class="question-block" id="q3">
+      <p class="q-text">What will you commit to today?</p>
+      <p class="q-hint">Pick one thing. Just one.</p>
+      <div class="options" id="q3-options"></div>
+      <div class="mirror-custom-reveal" id="q3-custom-reveal">
+        <input class="mirror-custom-input" id="q3-custom-input" type="text"
+          placeholder="What are you committing to?"
+          oninput="customTyped(this,'q3')" />
+      </div>
+      <button class="btn-next btn-pressable" id="btn-next-3" onclick="nextQuestion()">Finish</button>
+    </div>
+  </section>
+
+  <!-- ── ONE MOVE ── -->
+  <section id="onemove" class="screen">
+    <div class="bolt-icon"><i class="ti ti-bolt" style="font-size:22px;color:#E8571A"></i></div>
+    <p class="showed-up">You showed up.</p>
+    <h2 class="onemove-title">Your one move today</h2>
+    <p class="onemove-sub">Based on your pattern</p>
+
+    <div class="move-card">
+      <p class="move-card-label">Do this before noon</p>
+      <p class="move-card-text" id="move-card-text"></p>
+      <p class="move-card-target" id="move-card-target"></p>
+    </div>
+
+    <div class="move-actions">
+      <button class="btn-did-it btn-pressable" onclick="didIt()">That's done. Let's go.</button>
+      <button class="btn-remind btn-pressable" onclick="remindMe()">Remind me</button>
+    </div>
+
+    <div id="vn-section" class="vn-section"></div>
+
+    <button class="btn-share btn-pressable" onclick="shareExpose()">
+      <svg viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+      Flex your streak
+    </button>
+  </section>
+
+  <!-- ── SHARE CARD (off-screen, rendered by html2canvas) ── -->
+  <div id="share-card" style="
+    position:fixed; left:-9999px; top:-9999px;
+    width:1080px; height:1920px;
+    background:#0f0f0f;
+    border-radius:20px;
+    padding:60px;
+    display:flex; flex-direction:column; justify-content:space-between;
+    font-family:'Space Grotesk',sans-serif;
+    box-sizing:border-box;
+  ">
+    <!-- TOP -->
+    <p style="font-size:13px;color:#E8571A;text-transform:uppercase;letter-spacing:0.1em;font-weight:500;margin:0;">THE CYCLE BREAKER</p>
+
+    <!-- MIDDLE -->
+    <div style="display:flex;flex-direction:column;">
+      <p id="sc-pattern-label" style="font-size:12px;color:#444;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px;">MY PATTERN WAS</p>
+      <div style="background:#1a1a1a;border-left:2px solid #E8571A;border-radius:0 10px 10px 0;padding:16px 18px;">
+        <p id="sc-quote" style="font-size:16px;color:#f0f0f0;line-height:1.5;margin:0;"></p>
+      </div>
+      <div style="height:28px;"></div>
+      <p style="font-size:12px;color:#444;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 10px;">I BROKE IT BY</p>
+      <p id="sc-break" style="font-size:22px;font-weight:500;color:#E8571A;line-height:1.35;margin:0;white-space:pre-line;"></p>
+    </div>
+
+    <!-- BOTTOM -->
+    <div>
+      <div style="height:1px;background:#1e1e1e;margin-bottom:16px;"></div>
+      <p style="font-size:11px;color:#333;margin:0;">thecyclebreaker.app</p>
+    </div>
+  </div>
+
+  <!-- ── PATTERNS ── -->
+  <section id="patterns" class="screen">
+    <div class="patterns-header">
+      <p class="screen-eyebrow">Weekly Patterns</p>
+      <h2 class="screen-title">Your week<br />in patterns.</h2>
+    </div>
+    <div id="pattern-content"></div>
+    <button class="btn-ghost btn-pressable" onclick="goHome()">← Back to Home</button>
+  </section>
+
+  <!-- ── SETTINGS ── -->
+  <section id="settings" class="screen">
+    <p class="s-header">SETTINGS</p>
+
+    <p class="s-section-label">NOTIFICATIONS</p>
+
+    <div class="s-row">
+      <div class="s-row-left">
+        <p class="s-row-title">Daily reminder</p>
+        <p class="s-row-sub">One notification per day</p>
+      </div>
+      <label class="toggle-wrap btn-pressable">
+        <input type="checkbox" id="notif-toggle" class="toggle-input" onchange="onToggleNotifications(this)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <p class="s-ios-note" id="ios-note">Add this app to your home screen to enable notifications.</p>
+
+    <div class="s-row">
+      <div class="s-row-left">
+        <p class="s-row-title">Reminder time</p>
+        <p class="s-row-sub">Default is based on when you usually open the app</p>
+      </div>
+      <select id="notif-hour-select" class="s-select btn-pressable" onchange="onHourChange(this)"></select>
+    </div>
+
+    <p class="s-section-label" style="margin-top:28px">DATA</p>
+
+    <div class="s-row">
+      <div class="s-row-left">
+        <p class="s-row-title">Reset all data</p>
+        <p class="s-row-sub">Clears your streak, patterns and history</p>
+      </div>
+      <button class="s-reset-btn btn-pressable" onclick="showResetConfirm()">Reset</button>
+    </div>
+
+    <div id="reset-confirm" class="s-confirm-box" style="display:none">
+      <p class="s-confirm-text">Are you sure? This cannot be undone.</p>
+      <div class="s-confirm-row">
+        <button class="s-confirm-yes btn-pressable" onclick="confirmReset()">Yes, reset</button>
+        <button class="s-confirm-no btn-pressable"  onclick="cancelReset()">Cancel</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── BOTTOM NAV (shown on home + patterns) ── -->
+  <nav class="nav-bar" id="nav-bar">
+    <button class="nav-item btn-pressable-nav" onclick="goHome()">
+      <i class="ti ti-home active" id="nav-home-icon"></i>
+      <span class="nav-lbl active" id="nav-home-lbl">Home</span>
+    </button>
+    <button class="nav-item btn-pressable-nav" onclick="showPatterns()">
+      <i class="ti ti-chart-line" id="nav-patterns-icon"></i>
+      <span class="nav-lbl" id="nav-patterns-lbl">Patterns</span>
+    </button>
+    <button class="nav-item btn-pressable-nav" onclick="showSettings()">
+      <i class="ti ti-user" id="nav-profile-icon"></i>
+      <span class="nav-lbl" id="nav-profile-lbl">Profile</span>
+    </button>
+  </nav>
+
+</div>
+
+<script>
+  /* ── CONSTANTS ── */
+  const TOTAL = 3;
+  let currentQ = 1;
+  const answers = {};
+
+  /* ── AVOIDANCE CATEGORY ── */
+  function getAvoidanceCategory() {
+    const pa = (localStorage.getItem('primary_avoidance') || '').toLowerCase();
+    // Conversation avoidance (new + legacy)
+    if (pa.includes('hard conversations') || pa.includes('conversations') || pa.includes('avoid'))
+      return 'conversation';
+    // Action avoidance (new options + legacy)
+    if (pa.includes('creating content') || pa.includes('going outside') ||
+        pa.includes('starting the work') || pa.includes('delaying') ||
+        pa.includes('in my head') || pa.includes('taking action') || pa.includes('overthinking'))
+      return 'action';
+    // Completion avoidance (legacy)
+    if (pa.includes("start things") || pa.includes("don't finish") || pa.includes("finish"))
+      return 'finish';
+    return 'other';
+  }
+
+  /* ── MIRROR OPTION SETS ── */
+  const MIRROR_OPTION_SETS = {
+    finish: {
+      q1: ['Starting strong then losing momentum', 'Talking about it instead of doing it', 'Letting other things take priority'],
+      q2: ['I keep starting over instead of continuing', 'I quit when it stops feeling easy', "I convince myself I'll do it better tomorrow"],
+      q3: ['Finish one thing before starting anything new', 'Work on it for 20 minutes no matter what', "Tell someone what I'm committing to today"],
+    },
+    action: {
+      q1: ['Getting stuck overthinking instead of moving', 'Talking myself out of things before trying', "Waiting until I felt ready — which never came"],
+      q2: ['I overanalyze until the moment passes', 'Fear of it not being perfect stops me', 'I mistake planning for progress'],
+      q3: ['Do the first step before thinking about the rest', 'Make one decision today without overthinking it', "Act before I have time to talk myself out of it"],
+    },
+    conversation: {
+      q1: ["A conversation I needed to have but didn't", 'Letting tension build instead of addressing it', 'Saying yes when I meant no'],
+      q2: ['I avoid conflict even when it costs me', 'I rehearse what to say but never say it', 'I let things pile up until they explode'],
+      q3: ["Have the conversation I've been putting off", "Say one true thing I've been holding back", 'Set a boundary I keep letting people cross'],
+    },
+    other: {
+      q1: ["The thing I knew I should do but didn't", 'Staying comfortable instead of growing', 'Letting distractions win again'],
+      q2: ['I avoid discomfort even when it\'s good for me', 'I know what to do — I just don\'t do it', 'I let the day happen to me instead of directing it'],
+      q3: ["Do the one thing I've been avoiding", "Show up for myself even when I don't feel like it", 'Make today different from yesterday'],
+    },
+  };
+
+  /* ── ONE MOVE BY CATEGORY ── */
+  const ONE_MOVE_BY_CAT = {
+    finish: {
+      text: "Pick the one thing you keep restarting. Do only the next step — not the whole thing. Close the loop on just one piece.",
+      target: 'Targets: completion avoidance cycle',
+    },
+    action: {
+      text: "Set a 5-minute timer and begin. Not plan — begin. Momentum is built by moving, not by thinking about moving.",
+      target: 'Targets: overthinking cycle',
+    },
+    conversation: {
+      text: 'Send the first message. Three words: "Can we talk?" Before noon. The relief starts the second you hit send.',
+      target: 'Targets: conflict avoidance cycle',
+    },
+    other: {
+      text: "Pick one thing you said you'd do — and do just the first step. Right now, before the feeling fades.",
+      target: 'Targets: avoidance cycle',
+    },
+  };
+
+  /* ── PATTERN META BY CATEGORY ── */
+  const PATTERN_META_BY_CAT = {
+    finish: {
+      short: 'Not finishing what you start',
+      insight: 'You begin with energy and lose it before the finish line. The cycle lives in the gap between starting and completing.',
+    },
+    action: {
+      short: 'Thinking instead of doing',
+      insight: 'The gap between what you know and what you do is exactly where cycles live. You already have the answer — the pattern is not acting on it.',
+    },
+    conversation: {
+      short: 'Avoiding hard conversations',
+      insight: 'You keep choosing short-term comfort over long-term clarity. The conversation you\'re dreading is the one that would free you most.',
+    },
+    other: {
+      short: 'Avoiding what matters',
+      insight: 'You already know what needs to change. The pattern is finding reasons not to do it.',
+    },
+  };
+
+  /* ── LEGACY PATTERN_META (kept for backwards compatibility) ── */
+  const PATTERN_META = {
+    'A hard conversation I kept putting off':   PATTERN_META_BY_CAT.conversation,
+    'Taking action on something I already know': PATTERN_META_BY_CAT.action,
+    'Sitting with an uncomfortable feeling':    PATTERN_META_BY_CAT.other,
+    'Being fully honest with myself':           PATTERN_META_BY_CAT.other,
+    // New dynamic option texts
+    'Starting strong then losing momentum':      PATTERN_META_BY_CAT.finish,
+    'Talking about it instead of doing it':      PATTERN_META_BY_CAT.finish,
+    'Letting other things take priority':        PATTERN_META_BY_CAT.finish,
+    'Getting stuck overthinking instead of moving': PATTERN_META_BY_CAT.action,
+    'Talking myself out of things before trying':   PATTERN_META_BY_CAT.action,
+    "Waiting until I felt ready — which never came": PATTERN_META_BY_CAT.action,
+    "A conversation I needed to have but didn't":    PATTERN_META_BY_CAT.conversation,
+    'Letting tension build instead of addressing it': PATTERN_META_BY_CAT.conversation,
+    'Saying yes when I meant no':                    PATTERN_META_BY_CAT.conversation,
+    "The thing I knew I should do but didn't":       PATTERN_META_BY_CAT.other,
+    'Staying comfortable instead of growing':        PATTERN_META_BY_CAT.other,
+    'Letting distractions win again':                PATTERN_META_BY_CAT.other,
+  };
+
+  /* ── STORAGE HELPERS ── */
+  function getStreak()  { return parseInt(localStorage.getItem('cb_streak')  || '0', 10); }
+  function getTotal()   { return parseInt(localStorage.getItem('cb_total')   || '0', 10); }
+  function getCycles()  { return parseInt(localStorage.getItem('cb_cycles')  || '0', 10); }
+  function getLast()    { return localStorage.getItem('cb_last') || ''; }
+  function getHistory() { return JSON.parse(localStorage.getItem('cb_history') || '{}'); }
+
+  function yesterday() { return new Date(Date.now() - 86400000).toDateString(); }
+  function today()     { return new Date().toDateString(); }
+
+  /* ── SCREEN POSITION RESET ── */
+  function resetScreenPosition(el) {
+    if (!el) return;
+    el.style.transform = 'none';
+    el.style.animation = 'none';
+    el.style.opacity   = '1';
+    el.classList.remove('slide-in-right', 'slide-out-left', 'slide-in-left', 'slide-out-right');
+  }
+
+  /* ── ROUTING ── */
+  function navigateTo(showId, hideId, direction) {
+    const showEl = document.getElementById(showId);
+    const hideEl = document.getElementById(hideId);
+    if (!showEl || !hideEl) return;
+
+    // Nav bar visibility and active state
+    const showNav = showId === 'home' || showId === 'patterns' || showId === 'settings';
+    document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
+    if      (showId === 'home')     setNavActive('home');
+    else if (showId === 'patterns') setNavActive('patterns');
+    else if (showId === 'settings') setNavActive('settings');
+
+    // Pin both screens as fixed overlays so they slide side-by-side
+    const pin = 'position:fixed;top:0;left:0;width:100%;height:100%;overflow:hidden;';
+    showEl.setAttribute('style', pin);
+    hideEl.setAttribute('style', pin);
+    showEl.style.willChange = 'transform';
+    hideEl.style.willChange = 'transform';
+
+    // Apply slide direction classes
+    if (direction === 'forward') {
+      hideEl.classList.add('slide-out-left');
+      showEl.classList.add('slide-in-right');
+    } else {
+      hideEl.classList.add('slide-out-right');
+      showEl.classList.add('slide-in-left');
+    }
+
+    // Activate incoming screen (triggers display:flex via .screen.active)
+    showEl.classList.add('active');
+
+    setTimeout(() => {
+      // Remove outgoing screen
+      hideEl.classList.remove('active', 'slide-out-left', 'slide-out-right');
+      hideEl.removeAttribute('style');
+      hideEl.style.willChange = 'auto';
+      hideEl.style.transform  = 'none';
+
+      // Restore incoming screen to normal CSS-driven layout
+      showEl.classList.remove('slide-in-right', 'slide-in-left');
+      showEl.removeAttribute('style');
+      showEl.style.willChange = 'auto';
+      showEl.style.transform  = 'none';
+
+      window.scrollTo({ top: 0 });
+    }, 320);
+  }
+
+  function goTo(id) {
+    const curr = document.querySelector('.screen.active');
+    const showNav = (id === 'home' || id === 'patterns' || id === 'settings');
+    document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
+    if (!curr) { document.getElementById(id).classList.add('active'); return; }
+    curr.classList.add('out');
+    setTimeout(() => {
+      curr.classList.remove('active', 'out');
+      document.getElementById(id).classList.add('active');
+      window.scrollTo({ top: 0 });
+    }, 200);
+  }
+
+  const BADGE_KEYWORD = {
+    // Legacy
+    'A hard conversation I kept putting off':   'hard conversations',
+    'Taking action on something I already know': 'taking action',
+    'Sitting with an uncomfortable feeling':    'sitting with discomfort',
+    'Being fully honest with myself':           'being honest with yourself',
+    // Finish category
+    'Starting strong then losing momentum':     'finishing what you start',
+    'Talking about it instead of doing it':     'finishing what you start',
+    'Letting other things take priority':       'finishing what you start',
+    // Action category
+    'Getting stuck overthinking instead of moving': 'taking action',
+    'Talking myself out of things before trying':   'taking action',
+    "Waiting until I felt ready — which never came": 'taking action',
+    // Conversation category
+    "A conversation I needed to have but didn't":    'hard conversations',
+    'Letting tension build instead of addressing it': 'hard conversations',
+    'Saying yes when I meant no':                    'hard conversations',
+    // Other category
+    "The thing I knew I should do but didn't":       'doing what matters',
+    'Staying comfortable instead of growing':        'doing what matters',
+    'Letting distractions win again':                'doing what matters',
+  };
+
+  function setNavActive(id) {
+    document.getElementById('nav-home-lbl').classList.toggle('active',     id === 'home');
+    document.getElementById('nav-patterns-lbl').classList.toggle('active', id === 'patterns');
+    document.getElementById('nav-profile-lbl').classList.toggle('active',  id === 'settings');
+    document.getElementById('nav-home-icon').classList.toggle('active',     id === 'home');
+    document.getElementById('nav-patterns-icon').classList.toggle('active', id === 'patterns');
+    document.getElementById('nav-profile-icon').classList.toggle('active',  id === 'settings');
+  }
+
+  /* ── COMPLETION LOG ── */
+  function getCompletionLog() {
+    try { return JSON.parse(localStorage.getItem('completion_log') || '[]'); } catch (_) { return []; }
+  }
+  function addToCompletionLog(dateStr) {
+    const log = getCompletionLog();
+    if (!log.includes(dateStr)) {
+      log.push(dateStr);
+      localStorage.setItem('completion_log', JSON.stringify(log));
+    }
+  }
+
+  /* ── COUNTDOWN HELPERS ── */
+  let countdownInterval = null;
+
+  function getMsUntilMidnight() {
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0);
+    return midnight - now;
+  }
+
+  function formatCountdown(ms) {
+    const totalMin = Math.floor(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `Resets in ${h}h ${m}m`;
+  }
+
+  /* ── ENCOURAGING LINE ── */
+  function getEncourageMsg(completedCount) {
+    if (completedCount === 0) return { text: 'Every dot you fill is a day you showed up.', color: '#444' };
+    if (completedCount === 7) return { text: 'Perfect week. You\'re not the same person you were 7 days ago.', color: '#E8571A' };
+    if (completedCount >= 5) return { text: 'Strong week. Don\'t let up now.', color: '#E8571A' };
+    if (completedCount === 4) return { text: 'Half and half. This week tip the scale.', color: '#888' };
+    if (completedCount === 3) return { text: 'More misses than breaks this week. Change that today.', color: '#555' };
+    return { text: 'You know what your cycle looks like. Now break it.', color: '#444' };
+  }
+
+  /* ── HOME ── */
+  function renderHome() {
+    const streak  = getStreak();
+    const cycles  = getCycles();
+    const history = getHistory();
+
+    document.getElementById('h-today-date').textContent = new Date().toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    });
+
+    document.getElementById('h-subline').textContent = streak > 0
+      ? `${streak} day${streak === 1 ? '' : 's'} in a row. Don't stop now.`
+      : `Day 1 starts now.`;
+
+    document.getElementById('h-stat-streak').textContent = streak;
+    document.getElementById('h-stat-cycles').textContent = cycles;
+
+    // 7-dot strip — keyed from completion_log (YYYY-MM-DD)
+    const log = getCompletionLog();
+    let weekCompleted = 0;
+    document.getElementById('h-dots').innerHTML = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      const dStr = d.toISOString().split('T')[0];
+      const done = log.includes(dStr);
+      if (done) weekCompleted++;
+      return `<div class="h-dot${done ? ' done' : ''}">
+        <i class="ti ${done ? 'ti-check' : 'ti-x'}"></i>
+      </div>`;
+    }).join('');
+
+    // Encouraging line
+    const encourageEl = document.getElementById('h-encourage');
+    const hasAnyLog = log.length > 0;
+    const msg = getEncourageMsg(hasAnyLog ? weekCompleted : 0);
+    encourageEl.textContent = msg.text;
+    encourageEl.style.color  = msg.color;
+
+    // Pattern badge
+    const badge     = document.getElementById('h-badge');
+    const badgeText = document.getElementById('h-badge-text');
+    const weekKeys  = Object.keys(history).filter(k => (new Date() - new Date(k)) < 7 * 86400000);
+    if (weekKeys.length > 0) {
+      const tally = {};
+      weekKeys.forEach(k => { const e = history[k]; if (e && e.q1) tally[e.q1] = (tally[e.q1]||0)+1; });
+      const topKey  = Object.entries(tally).sort((a,b) => b[1]-a[1])[0][0];
+      const keyword = BADGE_KEYWORD[topKey] || topKey.toLowerCase();
+      badgeText.innerHTML = `You keep avoiding <strong>${keyword}</strong>.`;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+
+    // Completion card + midnight countdown
+    const todayStr      = todayISO();
+    const lastCompleted = localStorage.getItem('last_completed_date');
+    const isCompleted   = lastCompleted === todayStr;
+    const completeCard  = document.getElementById('h-complete-card');
+    const ctaBtn        = document.getElementById('h-cta-btn');
+
+    // Clear any existing countdown interval before deciding
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+
+    if (isCompleted) {
+      completeCard.classList.add('visible');
+      ctaBtn.style.display = 'none';
+      document.getElementById('h-complete-day').textContent = `Day ${streak}`;
+      const savedMove = localStorage.getItem('todays_move') || '';
+      document.getElementById('h-complete-move-text').textContent = savedMove;
+
+      // Countdown to midnight
+      const cdEl = document.getElementById('h-countdown');
+      const tick = () => {
+        const ms = getMsUntilMidnight();
+        if (ms <= 0 || todayISO() !== localStorage.getItem('last_completed_date')) {
+          // Midnight passed — reset without reload
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+          renderHome();
+          return;
+        }
+        cdEl.textContent = formatCountdown(ms);
+      };
+      tick(); // paint immediately
+      countdownInterval = setInterval(tick, 60000);
+    } else {
+      completeCard.classList.remove('visible');
+      ctaBtn.style.display = '';
+    }
+
+    setNavActive('home');
+
+    // Voice note button state
+    const vnBtn = document.getElementById('vn-home-btn');
+    if (vnBtn) {
+      if (vnHasRecordingToday()) {
+        vnBtn.style.color = '#E8571A';
+        vnBtn.style.textShadow = '0 0 8px rgba(232,87,26,0.3)';
+      } else {
+        vnBtn.style.color = '';
+        vnBtn.style.textShadow = '';
+      }
+    }
+    // Reset voice playback sheet on every home render
+    vnCloseSheet();
+  }
+
+  function goHome() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
+    resetMirror();
+    renderHome();
+    if (currId && currId !== 'home') {
+      navigateTo('home', currId, 'back');
+    } else {
+      goTo('home');
+    }
+  }
+
+  /* ── MIRROR ── */
+  /* ── BUILD MIRROR OPTIONS ── */
+  function buildMirrorOptions() {
+    const cat  = getAvoidanceCategory();
+    const sets = MIRROR_OPTION_SETS[cat] || MIRROR_OPTION_SETS.other;
+    const CHECK_SVG = `<span class="option-check"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>`;
+
+    ['q1', 'q2', 'q3'].forEach(qId => {
+      const opts = sets[qId];
+      const el   = document.getElementById(qId + '-options');
+      el.innerHTML = opts.map(text =>
+        `<button class="option btn-pressable-card" onclick="selectOption(this,'${qId}')">
+          <span>${text}</span>${CHECK_SVG}
+        </button>`
+      ).join('') +
+      `<button class="option btn-pressable-card" style="color:#666" onclick="selectCustomOption('${qId}')">
+        <span>Let me type it</span>${CHECK_SVG}
+      </button>`;
+    });
+  }
+
+  function resetMirror() {
+    currentQ = 1;
+    Object.keys(answers).forEach(k => delete answers[k]);
+    document.querySelectorAll('.question-block').forEach(b => b.classList.remove('active'));
+    document.getElementById('q1').classList.add('active');
+    document.querySelectorAll('.btn-next').forEach(b => b.classList.remove('enabled'));
+    // Collapse all custom reveals and clear inputs
+    ['q1','q2','q3'].forEach(qId => {
+      const rev = document.getElementById(qId + '-custom-reveal');
+      if (rev) rev.classList.remove('visible');
+      const inp = document.getElementById(qId + '-custom-input');
+      if (inp) inp.value = '';
+    });
+    buildMirrorOptions();
+    updateProgress();
+  }
+
+  function mirrorBack() {
+    if (currentQ === 1) { goHome(); return; }
+    document.getElementById('q' + currentQ).classList.remove('active');
+    currentQ--;
+    document.getElementById('q' + currentQ).classList.add('active');
+    updateProgress();
+  }
+
+  function selectOption(btn, qId) {
+    btn.closest('.options').querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+    btn.classList.add('selected');
+    const text = btn.querySelector('span:first-child').textContent.trim();
+    answers[qId] = text;
+    localStorage.setItem('mirror_' + qId, text);
+    // Collapse custom input
+    const rev = document.getElementById(qId + '-custom-reveal');
+    if (rev) rev.classList.remove('visible');
+    const inp = document.getElementById(qId + '-custom-input');
+    if (inp) inp.value = '';
+    document.getElementById('btn-next-' + currentQ).classList.add('enabled');
+  }
+
+  function selectCustomOption(qId) {
+    const opts = document.getElementById(qId + '-options');
+    opts.querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+    // Select the last card (Let me type it)
+    const cards = opts.querySelectorAll('.option');
+    cards[cards.length - 1].classList.add('selected');
+    // Show input
+    const rev = document.getElementById(qId + '-custom-reveal');
+    rev.classList.add('visible');
+    // Disable next until text typed
+    const btn = document.getElementById('btn-next-' + currentQ);
+    btn.classList.remove('enabled');
+    // Autofocus
+    setTimeout(() => document.getElementById(qId + '-custom-input').focus(), 50);
+  }
+
+  function customTyped(input, qId) {
+    const text = input.value.trim();
+    answers[qId] = text || undefined;
+    if (text) localStorage.setItem('mirror_' + qId, text);
+    const btn = document.getElementById('btn-next-' + currentQ);
+    if (text.length > 0) {
+      btn.classList.add('enabled');
+    } else {
+      btn.classList.remove('enabled');
+    }
+  }
+
+  function updateProgress() {
+    document.getElementById('progress-fill').style.width = (currentQ / TOTAL * 100) + '%';
+    document.getElementById('q-counter').textContent = `Question ${currentQ} of ${TOTAL}`;
+    // Dots: cumulative — dots 1..currentQ are active
+    document.querySelectorAll('.q-dot').forEach((dot, i) => {
+      dot.classList.toggle('active', i < currentQ);
+    });
+  }
+
+  function nextQuestion() {
+    // Also accept text typed into the custom input
+    const customInput = document.getElementById('q' + currentQ + '-custom-input');
+    if (customInput && customInput.value.trim() && !answers['q' + currentQ]) {
+      answers['q' + currentQ] = customInput.value.trim();
+    }
+    if (!answers['q' + currentQ]) return;
+    if (currentQ < TOTAL) {
+      document.getElementById('q' + currentQ).classList.remove('active');
+      currentQ++;
+      document.getElementById('q' + currentQ).classList.add('active');
+      updateProgress();
+    } else {
+      saveSession();
+      buildOneMove();
+      setTimeout(() => navigateTo('onemove', 'mirror', 'forward'), 280);
+    }
+  }
+
+  /* ── ONE MOVE ── */
+  function buildOneMove() {
+    const cat = getAvoidanceCategory();
+    const map = ONE_MOVE_BY_CAT[cat] || ONE_MOVE_BY_CAT.other;
+    document.getElementById('move-card-text').textContent   = map.text;
+    document.getElementById('move-card-target').textContent = map.target;
+
+    // Show "Flex your streak" only after first completion (total_completions >= 1)
+    const completions = parseInt(localStorage.getItem('total_completions') || '0', 10);
+    const shareBtn = document.querySelector('.btn-share');
+    if (shareBtn) {
+      shareBtn.style.display = completions >= 1 ? '' : 'none';
+    }
+
+    buildVoiceNoteSection();
+  }
+
+  function todayISO() {
+    return new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  }
+
+  function fireAnimation(cb) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:#E8571A;opacity:0;z-index:9999;pointer-events:none;transition:opacity 150ms ease;';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => {
+      overlay.style.opacity = '0.3';
+      setTimeout(() => {
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+          overlay.remove();
+          if (cb) cb();
+        }, 150);
+      }, 150);
+    });
+  }
+
+  /* ── COMPLETION BURST ── */
+  function triggerCompletionBurst() {
+
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;';
+    document.body.appendChild(container);
+
+    const colors = [];
+    for (let i = 0; i < 24; i++) {
+      const r = Math.random();
+      if      (r < 0.40) colors.push('#E8571A');
+      else if (r < 0.70) colors.push('#FF7A3D');
+      else if (r < 0.90) colors.push('#FFB347');
+      else               colors.push('#f0f0f0');
+    }
+
+    let maxEnd = 0;
+    colors.forEach((color, i) => {
+      const p       = document.createElement('div');
+      const w       = 5 + Math.random() * 4;
+      const h       = 8 + Math.random() * 6;
+      const angle   = Math.random() * Math.PI * 2;
+      const dist    = 80 + Math.random() * 140;
+      const endX    = Math.cos(angle) * dist;
+      const endY    = Math.sin(angle) * dist;
+      const dur     = 500 + Math.random() * 300;
+      const delay   = Math.random() * 150;
+      const rot     = 180 + Math.random() * 180;
+
+      p.style.cssText = `position:absolute;width:${w}px;height:${h}px;border-radius:3px;background:${color};left:50%;top:50%;transform:translate(-50%,-50%);`;
+      container.appendChild(p);
+
+      p.animate([
+        { transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
+        { transform: `translate(calc(-50% + ${endX}px),calc(-50% + ${endY}px)) scale(0.3) rotate(${rot}deg)`, opacity: 0 }
+      ], {
+        duration: dur,
+        delay:    delay,
+        easing:   'cubic-bezier(0.25,0.46,0.45,0.94)',
+        fill:     'forwards'
+      });
+
+      maxEnd = Math.max(maxEnd, dur + delay);
+    });
+
+    setTimeout(() => { container.remove(); }, maxEnd + 50);
+  }
+
+  /* ── STREAK POP ── */
+  function animateStreakPop() {
+    const streakNumEl = document.getElementById('h-stat-streak');
+    const streakCard  = document.querySelector('.h-stat-card');
+    if (!streakNumEl || !streakCard) return;
+
+    streakNumEl.animate([
+      { transform: 'scale(1)',    color: '#E8571A' },
+      { transform: 'scale(1.35)', color: '#FF7A3D', offset: 0.4 },
+      { transform: 'scale(0.95)', color: '#E8571A', offset: 0.7 },
+      { transform: 'scale(1)',    color: '#E8571A' }
+    ], {
+      duration: 400,
+      easing:   'cubic-bezier(0.34,1.56,0.64,1)',
+      fill:     'forwards'
+    });
+
+    streakCard.animate([
+      { boxShadow: '0 0 0px rgba(232,87,26,0)' },
+      { boxShadow: '0 0 20px rgba(232,87,26,0.4)' },
+      { boxShadow: '0 0 0px rgba(232,87,26,0)' }
+    ], {
+      duration: 600,
+      easing:   'ease-out'
+    });
+  }
+
+  function didIt() {
+    vnReleaseStream();
+    const todayStr = todayISO();
+    localStorage.setItem('last_completed_date', todayStr);
+    const moveText = document.getElementById('move-card-text').textContent;
+    localStorage.setItem('todays_move', moveText);
+    // Log completion for dot row
+    addToCompletionLog(todayStr);
+    // Increment total_completions
+    const prev = parseInt(localStorage.getItem('total_completions') || '0', 10);
+    localStorage.setItem('total_completions', String(prev + 1));
+    fireAnimation(() => {
+      renderHome();
+      navigateTo('home', 'onemove', 'forward');
+      setTimeout(() => {
+        triggerCompletionBurst();
+        animateStreakPop();
+      }, 340);
+    });
+  }
+
+  function remindMe() {
+    vnReleaseStream();
+    fireAnimation(() => {
+      renderHome();
+      navigateTo('home', 'onemove', 'forward');
+    });
+  }
+
+  /* ── SESSION SAVE ── */
+  function saveSession() {
+    const t       = today();
+    const last    = getLast();
+    let streak    = getStreak();
+    let total     = getTotal();
+    let cycles    = getCycles();
+    const history = getHistory();
+
+    if (last !== t) {
+      total += 1;
+      if (last === yesterday()) {
+        streak += 1;
+      } else {
+        if (streak > 0) cycles += 1;
+        streak = 1;
+        if (cycles === 0) cycles = 1;
+      }
+      localStorage.setItem('cb_streak',  streak);
+      localStorage.setItem('cb_total',   total);
+      localStorage.setItem('cb_cycles',  cycles);
+      localStorage.setItem('cb_last',    t);
+      history[t] = { q1: answers['q1'], q2: answers['q2'], q3: answers['q3'] };
+      localStorage.setItem('cb_history', JSON.stringify(history));
+      if (answers['q1']) {
+        localStorage.setItem('cb_last_avoided', answers['q1']);
+        localStorage.setItem('mirror_q1', answers['q1']);
+      }
+      if (answers['q2']) localStorage.setItem('mirror_q2', answers['q2']);
+      if (answers['q3']) localStorage.setItem('mirror_q3', answers['q3']);
+    }
+  }
+
+  /* ── PATTERNS ── */
+  function showPatterns() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
+    renderPatterns();
+    if (currId && currId !== 'patterns') {
+      navigateTo('patterns', currId, 'forward');
+    } else {
+      setNavActive('patterns');
+      goTo('patterns');
+    }
+  }
+
+  function last7Days() {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d;
+    });
+  }
+
+  function renderPatterns() {
+    const history = getHistory();
+    const days    = last7Days();
+    const el      = document.getElementById('pattern-content');
+    const done    = days.filter(d => history[d.toDateString()]);
+
+    if (done.length === 0) {
+      el.innerHTML = `<div class="pattern-empty"><strong>Nothing here yet.</strong><p>Complete your first Daily Mirror to start seeing your patterns.</p></div>`;
+      return;
+    }
+
+    const tally = {};
+    done.forEach(d => {
+      const e = history[d.toDateString()];
+      if (e && e.q1) tally[e.q1] = (tally[e.q1]||0)+1;
+    });
+    const sorted   = Object.entries(tally).sort((a,b) => b[1]-a[1]);
+    const topKey   = sorted[0][0];
+    const topMeta  = PATTERN_META[topKey] || { short: topKey, insight: '' };
+    const maxCount = sorted[0][1];
+
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const grid = days.map(d => {
+      const isDone = !!history[d.toDateString()];
+      return `<div class="week-cell${isDone ? ' done' : ''}">
+        <span class="wc-name">${dayNames[d.getDay()]}</span>
+        <span class="wc-pip"></span>
+      </div>`;
+    }).join('');
+
+    const bars = sorted.map(([key, count]) => {
+      const pct   = Math.round(count / maxCount * 100);
+      const label = PATTERN_META[key] ? PATTERN_META[key].short : key;
+      return `<div class="breakdown-item">
+        <div class="breakdown-bar-row">
+          <span class="breakdown-name">${label}</span>
+          <span class="breakdown-count">${count}×</span>
+        </div>
+        <div class="breakdown-bar-bg">
+          <div class="breakdown-bar-fill" style="width:0%" data-w="${pct}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="background:#1a1a1a;border:0.5px solid #E8571A;border-radius:16px;padding:28px 22px;margin-bottom:20px;">
+        <p style="font-size:11px;color:#E8571A;text-transform:uppercase;letter-spacing:0.1em;font-weight:600;margin-bottom:14px;">YOU KEEP AVOIDING</p>
+        <p style="font-size:28px;font-weight:600;color:#f0f0f0;line-height:1.2;margin-bottom:8px;">${topMeta.short}</p>
+        <p style="font-size:13px;color:#555;">This is your cycle. Name it.</p>
+      </div>
+      <p class="section-label">This Week</p>
+      <div class="week-grid">${grid}</div>
+      <p class="section-label">Full Breakdown</p>
+      <div class="breakdown-list">${bars}</div>
+    `;
+
+    requestAnimationFrame(() => {
+      el.querySelectorAll('.breakdown-bar-fill').forEach(b => {
+        requestAnimationFrame(() => { b.style.width = b.dataset.w; });
+      });
+    });
+  }
+
+  /* ── SHARE CARD ── */
+  const SHARE_Q1 = {
+    'A hard conversation I kept putting off':      'avoided hard conversations',
+    'Taking action on something I already know':   'avoided taking action I already knew I needed to',
+    'Sitting with an uncomfortable feeling':       'avoided sitting with discomfort',
+    'Being fully honest with myself':              'avoided being honest with myself',
+  };
+
+  const SHARE_Q2 = {
+    'Procrastinating until it felt too late': 'things pile up',
+    'Doubting myself before I even started':  'doubt kicks in',
+    'Choosing distraction over presence':     'I reach for distraction',
+    'Saying yes when I meant no':             'I say yes instead of no',
+  };
+
+  function buildShareCard() {
+    const q1       = answers['q1'] || '';
+    const q2       = answers['q2'] || '';
+    const q3       = answers['q3'] || '';
+    const streak   = getStreak();
+    const avoided  = SHARE_Q1[q1] || q1.toLowerCase();
+    const pattern  = SHARE_Q2[q2] || q2.toLowerCase();
+    const quote    = `I ${avoided} every time ${pattern}.`;
+    const breakTxt = `${q3}\n${streak} day${streak === 1 ? '' : 's'} running.`;
+
+    document.getElementById('sc-quote').textContent = quote;
+    document.getElementById('sc-break').textContent = breakTxt;
+  }
+
+  async function shareExpose() {
+    buildShareCard();
+    const card = document.getElementById('share-card');
+    const btn  = document.querySelector('.btn-share');
+
+    btn.textContent = 'Generating…';
+    btn.style.pointerEvents = 'none';
+
+    try {
+      const canvas = await html2canvas(card, {
+        width:      1080,
+        height:     1920,
+        scale:      1,
+        useCORS:    true,
+        backgroundColor: '#0f0f0f',
+        logging:    false,
+      });
+
+      canvas.toBlob(async (blob) => {
+        const file = new File([blob], 'my-cycle-expose.png', { type: 'image/png' });
+
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files:  [file],
+            title:  'My Cycle Exposé',
+          });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a   = document.createElement('a');
+          a.href     = url;
+          a.download = 'my-cycle-expose.png';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }, 'image/png');
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('Could not generate share card. Try again.');
+    } finally {
+      btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:#E8571A;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> Flex your streak`;
+      btn.style.pointerEvents = 'auto';
+    }
+  }
+
+  /* ── VOICE NOTE ── */
+  let vnRecorder       = null;
+  let vnStream         = null;
+  let vnChunks         = [];
+  let vnCountdownTimer = null;
+  let vnIsRecording    = false;
+  let vnAudio          = null;
+  let vnWaveformTimer  = null;
+  let vnStaticHeights  = [];
+  let vnCardOpen       = false;
+  let vnSheetEl        = null;
+
+  function vnReleaseStream() {
+    if (vnStream) {
+      vnStream.getTracks().forEach(t => t.stop());
+      vnStream = null;
+    }
+  }
+
+  function vnHasRecordingToday() {
+    return localStorage.getItem('voice_note_date') === todayISO()
+        && !!localStorage.getItem('todays_voice_note');
+  }
+
+  /* Part 1 — Recording section on One Move screen */
+  function buildVoiceNoteSection() {
+    const el = document.getElementById('vn-section');
+    if (!el) return;
+
+    if (!window.MediaRecorder) {
+      el.innerHTML = `<p class="vn-already">Voice recording not supported on this device.</p>`;
+      return;
+    }
+
+    if (vnHasRecordingToday()) {
+      el.innerHTML = `<p class="vn-already">Voice note recorded today.</p>`;
+      return;
+    }
+
+    el.innerHTML = `
+      <p class="vn-label">SAY SOMETHING TO YOURSELF</p>
+      <p class="vn-subline">Hold to record. 30 seconds max.</p>
+      <button class="vn-record-btn" id="vn-record-btn">
+        <i class="ti ti-microphone"></i>
+      </button>
+      <p class="vn-countdown" id="vn-countdown"></p>
+      <p class="vn-error" id="vn-error" style="display:none"></p>
+    `;
+
+    const btn = document.getElementById('vn-record-btn');
+    let isButtonHeld = false;
+
+    function _doStartRecording() {
+      if (vnIsRecording) return;
+      vnIsRecording = true;
+      vnChunks = [];
+
+      const mimeTypes = ['audio/webm', 'audio/mp4', 'audio/ogg', ''];
+      const mimeType  = mimeTypes.find(t => t === '' || MediaRecorder.isTypeSupported(t));
+      const opts = mimeType ? { mimeType } : {};
+      vnRecorder = new MediaRecorder(vnStream, opts);
+      vnRecorder.ondataavailable = e => { if (e.data.size > 0) vnChunks.push(e.data); };
+      vnRecorder.start();
+
+      btn.classList.add('recording');
+
+      let remaining = 30;
+      const cdEl = document.getElementById('vn-countdown');
+      if (cdEl) cdEl.textContent = '0:30';
+      vnCountdownTimer = setInterval(() => {
+        remaining--;
+        const cd = document.getElementById('vn-countdown');
+        if (cd) cd.textContent = `0:${remaining < 10 ? '0' : ''}${remaining}`;
+        if (remaining <= 0) stopRecording();
+      }, 1000);
+    }
+
+    function startRecording() {
+      if (vnIsRecording) return;
+      isButtonHeld = true;
+      if (!vnStream) {
+        // First hold — request mic permission, then start only if still held
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+          vnStream = stream;
+          if (isButtonHeld) _doStartRecording();
+        }).catch(() => {
+          isButtonHeld = false;
+          const errEl = document.getElementById('vn-error');
+          if (errEl) {
+            errEl.textContent = 'Microphone access needed.';
+            errEl.style.display = 'block';
+          }
+        });
+      } else {
+        // Permission already granted — start immediately
+        _doStartRecording();
+      }
+    }
+
+    function stopRecording() {
+      if (!vnIsRecording) return;
+      vnIsRecording = false;
+
+      clearInterval(vnCountdownTimer);
+      vnCountdownTimer = null;
+
+      const cd = document.getElementById('vn-countdown');
+      if (cd) cd.textContent = '';
+
+      if (btn) btn.classList.remove('recording');
+
+      // Keep vnStream alive for potential re-recording; only stop the MediaRecorder
+      if (vnRecorder && vnRecorder.state !== 'inactive') {
+        vnRecorder.onstop = () => {
+          const blob   = new Blob(vnChunks, { type: vnRecorder.mimeType || 'audio/mp4' });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            localStorage.setItem('todays_voice_note', reader.result);
+            localStorage.setItem('voice_note_date', todayISO());
+            // Recording is saved — release the mic stream immediately
+            vnReleaseStream();
+            const section = document.getElementById('vn-section');
+            if (section) {
+              section.innerHTML = `
+                <div class="vn-saved">
+                  <i class="ti ti-check"></i>
+                  Saved. Tap Voice note on your home screen to play it back.
+                </div>
+              `;
+            }
+          };
+          reader.readAsDataURL(blob);
+        };
+        vnRecorder.stop();
+      }
+    }
+
+    btn.addEventListener('mousedown',   e => { e.preventDefault(); startRecording(); });
+    btn.addEventListener('mouseup',     e => { e.preventDefault(); isButtonHeld = false; stopRecording(); });
+    btn.addEventListener('mouseleave',  () => { isButtonHeld = false; if (vnIsRecording) stopRecording(); });
+    btn.addEventListener('touchstart',  e => { e.preventDefault(); startRecording(); }, { passive: false });
+    btn.addEventListener('touchend',    e => { e.preventDefault(); isButtonHeld = false; stopRecording(); }, { passive: false });
+    btn.addEventListener('touchcancel', () => { isButtonHeld = false; if (vnIsRecording) stopRecording(); });
+  }
+
+  /* Part 2 — Playback on home screen (bottom sheet) */
+  function voiceNote() {
+    if (!vnHasRecordingToday()) {
+      const tip = document.getElementById('vn-tooltip');
+      if (tip) {
+        tip.textContent = "Complete today's mirror to record.";
+        tip.style.opacity = '1';
+        setTimeout(() => { tip.style.opacity = '0'; }, 2000);
+      }
+      return;
+    }
+    if (vnCardOpen) {
+      vnCloseSheet();
+    } else {
+      vnOpenSheet();
+    }
+  }
+
+  function vnOpenSheet() {
+    if (vnSheetEl) return;
+    vnCardOpen = true;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'vn-sheet-backdrop';
+    backdrop.addEventListener('click', vnCloseSheet);
+
+    const sheet = document.createElement('div');
+    sheet.className = 'vn-sheet';
+    sheet.innerHTML = `
+      <span class="vn-sheet-handle"></span>
+      <div class="vn-sheet-top">
+        <span class="vn-sheet-label">TODAY'S NOTE</span>
+        <button class="vn-sheet-close btn-pressable" onclick="vnCloseSheet()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="vn-waveform" id="vn-waveform" style="margin:16px 0"></div>
+      <div class="vn-sheet-controls">
+        <button class="vn-sheet-play-btn btn-pressable" onclick="vnTogglePlay()">
+          <i class="ti ti-player-play" id="vn-play-icon"></i>
+        </button>
+        <span class="vn-sheet-date">Recorded today</span>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(sheet);
+    vnSheetEl = sheet;
+
+    // Double rAF ensures transition fires after element is in the DOM
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { sheet.classList.add('open'); });
+    });
+
+    vnBuildWaveform();
+  }
+
+  function vnCloseSheet() {
+    if (!vnSheetEl) return;
+    vnCardOpen = false;
+    vnStopPlayback();
+
+    const sheet = vnSheetEl;
+    vnSheetEl = null;
+    sheet.style.transition = 'transform 250ms ease-in';
+    sheet.classList.remove('open');
+
+    const backdrop = document.querySelector('.vn-sheet-backdrop');
+    setTimeout(() => {
+      sheet.remove();
+      if (backdrop) backdrop.remove();
+    }, 250);
+  }
+
+  function vnBuildWaveform() {
+    const wf = document.getElementById('vn-waveform');
+    if (!wf) return;
+    vnStaticHeights = Array.from({ length: 20 }, () => 8 + Math.floor(Math.random() * 17));
+    wf.innerHTML = vnStaticHeights.map(h =>
+      `<div class="vn-bar" style="height:${h}px"></div>`
+    ).join('');
+  }
+
+  function vnTogglePlay() {
+    if (!vnAudio) {
+      const b64 = localStorage.getItem('todays_voice_note');
+      if (!b64) return;
+      vnAudio = new Audio(b64);
+      vnAudio.onended = () => {
+        const icon = document.getElementById('vn-play-icon');
+        if (icon) icon.className = 'ti ti-player-play';
+        vnStopWaveformAnim();
+        vnAudio = null;
+      };
+    }
+    if (vnAudio.paused) {
+      vnAudio.play();
+      const icon = document.getElementById('vn-play-icon');
+      if (icon) icon.className = 'ti ti-player-pause';
+      vnStartWaveformAnim();
+    } else {
+      vnAudio.pause();
+      const icon = document.getElementById('vn-play-icon');
+      if (icon) icon.className = 'ti ti-player-play';
+      vnStopWaveformAnim();
+    }
+  }
+
+  function vnStopPlayback() {
+    if (vnAudio) {
+      vnAudio.pause();
+      vnAudio = null;
+    }
+    vnStopWaveformAnim();
+    const icon = document.getElementById('vn-play-icon');
+    if (icon) icon.className = 'ti ti-player-play';
+  }
+
+  function vnStartWaveformAnim() {
+    const wf = document.getElementById('vn-waveform');
+    if (!wf) return;
+    vnWaveformTimer = setInterval(() => {
+      wf.querySelectorAll('.vn-bar').forEach(bar => {
+        bar.style.height = (4 + Math.floor(Math.random() * 25)) + 'px';
+      });
+    }, 100);
+  }
+
+  function vnStopWaveformAnim() {
+    clearInterval(vnWaveformTimer);
+    vnWaveformTimer = null;
+    const wf = document.getElementById('vn-waveform');
+    if (wf) {
+      wf.querySelectorAll('.vn-bar').forEach((bar, i) => {
+        bar.style.height = (vnStaticHeights[i] || 12) + 'px';
+      });
+    }
+  }
+
+  /* ── ONBOARDING ── */
+  const OB2_OPTIONS = [
+    'Creating content',
+    'Having hard conversations',
+    'Going outside and moving',
+    'Starting the work I keep delaying',
+  ];
+  let ob2SelectedIndex = -1;
+
+  function obGoTo(screenIndex) {
+    document.getElementById('ob-track').style.transform =
+      `translateX(-${screenIndex * 100}vw)`;
+  }
+
+  function ob2Select(el, idx) {
+    ob2SelectedIndex = idx;
+    el.closest('.ob-screen').querySelectorAll('.ob-option')
+      .forEach(c => c.classList.remove('ob-selected'));
+    el.classList.add('ob-selected');
+    localStorage.setItem('primary_avoidance', OB2_OPTIONS[idx]);
+    document.getElementById('ob-s2-btn').classList.remove('ob-disabled');
+  }
+
+  function ob2Confirm() {
+    if (ob2SelectedIndex < 0) return;
+    obGoTo(2);
+  }
+
+  function obComplete() {
+    localStorage.setItem('onboarding_complete', 'true');
+    if (!localStorage.getItem('cb_streak'))  localStorage.setItem('cb_streak',  '0');
+    if (!localStorage.getItem('cb_cycles'))  localStorage.setItem('cb_cycles', '0');
+
+    document.getElementById('ob-container').style.display = 'none';
+    document.getElementById('nav-bar').style.display = 'none';
+
+    // Reset all screen positions so no leftover transform/animation state
+    // causes a shake on the first transition after onboarding
+    ['home', 'mirror', 'onemove', 'patterns', 'settings'].forEach(id => {
+      resetScreenPosition(document.getElementById(id));
+    });
+
+    // Show Day 1 banner if this is the very first session
+    if (localStorage.getItem('cb_streak') === '0') {
+      document.getElementById('mirror-day1-banner').style.display = 'block';
+    }
+
+    // Go directly to Daily Mirror
+    document.getElementById('home').classList.remove('active');
+    resetMirror();
+    document.getElementById('mirror').classList.add('active');
+    window.scrollTo({ top: 0 });
+  }
+
+  async function obRequestNotifications() {
+    if ('Notification' in window) {
+      try {
+        const result = await Notification.requestPermission();
+        if (result === 'granted') {
+          localStorage.setItem('notifications_enabled', 'true');
+        }
+      } catch (e) { /* permission API not supported */ }
+    }
+    obComplete();
+  }
+
+  /* ── NOTIFICATION SCHEDULING ── */
+  function trackOpenHour() {
+    const hour = new Date().getHours();
+    const arr  = JSON.parse(localStorage.getItem('open_hours') || '[]');
+    arr.push(hour);
+    if (arr.length > 14) arr.splice(0, arr.length - 14);
+    localStorage.setItem('open_hours', JSON.stringify(arr));
+  }
+
+  function calcSmartHour() {
+    const arr = JSON.parse(localStorage.getItem('open_hours') || '[]');
+    if (arr.length < 3) return 9;
+    const freq = {};
+    arr.forEach(h => { freq[h] = (freq[h] || 0) + 1; });
+    return parseInt(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0], 10);
+  }
+
+  function buildNotificationBody() {
+    const primary     = localStorage.getItem('primary_avoidance') || 'your habits';
+    const lastAvoided = localStorage.getItem('cb_last_avoided')   || primary;
+    const streak      = parseInt(localStorage.getItem('cb_streak') || '0', 10);
+    if (!streak) {
+      return `You said you keep avoiding ${primary}. Today's the day you don't. Open the mirror.`;
+    }
+    return `You avoided ${lastAvoided} yesterday. Don't do it again today. Day ${streak} — keep it moving.`;
+  }
+
+  function isStandalone() {
+    return window.navigator.standalone === true ||
+           window.matchMedia('(display-mode: standalone)').matches;
+  }
+
+  function scheduleNotification() {
+    if (localStorage.getItem('notifications_enabled') !== 'true') return;
+    if (!('serviceWorker' in navigator)) return;
+    if (!isStandalone()) return;
+
+    const smart  = calcSmartHour();
+    localStorage.setItem('smart_notify_hour', smart);
+    const manual = localStorage.getItem('manual_notify_hour');
+    const hour   = manual !== null ? parseInt(manual, 10) : smart;
+
+    navigator.serviceWorker.ready.then(reg => {
+      const target = reg.active || reg.installing || reg.waiting;
+      if (target) {
+        target.postMessage({
+          type:    'SCHEDULE_NOTIFICATION',
+          payload: { title: 'The Cycle Breaker', body: buildNotificationBody() },
+          hour,
+        });
+      }
+    }).catch(() => {});
+  }
+
+  /* ── SETTINGS ── */
+  function showSettings() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
+    renderSettings();
+    if (currId && currId !== 'settings') {
+      navigateTo('settings', currId, 'forward');
+    } else {
+      setNavActive('settings');
+      goTo('settings');
+    }
+  }
+
+  function renderSettings() {
+    buildHourOptions();
+    document.getElementById('notif-toggle').checked =
+      localStorage.getItem('notifications_enabled') === 'true';
+
+    const manual  = localStorage.getItem('manual_notify_hour');
+    const curHour = manual !== null ? parseInt(manual, 10) : calcSmartHour();
+    document.getElementById('notif-hour-select').value = curHour;
+
+    document.getElementById('ios-note').style.display = isStandalone() ? 'none' : 'block';
+    document.getElementById('reset-confirm').style.display = 'none';
+  }
+
+  function buildHourOptions() {
+    const sel = document.getElementById('notif-hour-select');
+    if (sel.options.length > 0) return;
+    for (let h = 6; h <= 22; h++) {
+      const opt    = document.createElement('option');
+      opt.value    = h;
+      const period = h < 12 ? 'AM' : 'PM';
+      const disp   = h === 12 ? 12 : (h > 12 ? h - 12 : h);
+      opt.textContent = `${disp}:00 ${period}`;
+      sel.appendChild(opt);
+    }
+  }
+
+  function onToggleNotifications(cb) {
+    if (cb.checked) {
+      if (!('Notification' in window)) { cb.checked = false; return; }
+      Notification.requestPermission().then(result => {
+        if (result === 'granted') {
+          localStorage.setItem('notifications_enabled', 'true');
+          scheduleNotification();
+        } else {
+          cb.checked = false;
+          localStorage.setItem('notifications_enabled', 'false');
+        }
+      });
+    } else {
+      localStorage.setItem('notifications_enabled', 'false');
+      navigator.serviceWorker.ready.then(reg => {
+        const target = reg.active || reg.installing || reg.waiting;
+        if (target) target.postMessage({ type: 'CANCEL_NOTIFICATION' });
+      }).catch(() => {});
+    }
+  }
+
+  function onHourChange(sel) {
+    localStorage.setItem('manual_notify_hour', sel.value);
+    scheduleNotification();
+  }
+
+  function showResetConfirm() {
+    document.getElementById('reset-confirm').style.display = 'block';
+  }
+
+  function confirmReset() {
+    Object.keys(localStorage).forEach(k => {
+      if (k !== 'onboarding_complete') localStorage.removeItem(k);
+    });
+    window.location.reload();
+  }
+
+  function cancelReset() {
+    document.getElementById('reset-confirm').style.display = 'none';
+  }
+
+  /* ── SPRING RELEASE DELEGATION ── */
+  // Press down: cancel any in-flight release transition so the press
+  // snaps instantly. Release: add spring curve class, then remove it
+  // after the overshoot settles so CSS rules stay clean.
+  document.addEventListener('touchstart', function(e) {
+    const el = e.target.closest('.btn-pressable');
+    if (!el) return;
+    el.classList.remove('btn-pressable-release');
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e) {
+    const el = e.target.closest('.btn-pressable');
+    if (!el) return;
+    el.classList.add('btn-pressable-release');
+    setTimeout(() => { el.classList.remove('btn-pressable-release'); }, 200);
+  }, { passive: true });
+
+  /* ── INIT ── */
+  updateProgress();
+  trackOpenHour();
+  if (localStorage.getItem('onboarding_complete') === 'true') {
+    document.getElementById('ob-container').style.display = 'none';
+    renderHome();
+    document.getElementById('nav-bar').style.display = 'flex';
+    scheduleNotification();
+  } else {
+    // First launch — ob-container is visible by default, hide app screens
+    document.getElementById('home').classList.remove('active');
+    document.getElementById('nav-bar').style.display = 'none';
+  }
+</script>
+</body>
+</html>
