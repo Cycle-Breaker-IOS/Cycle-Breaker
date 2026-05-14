@@ -15,7 +15,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
+      navigator.serviceWorker.register('Cycle-Breaker/service-worker.js')
         .then(() => console.log('SW registered'))
         .catch(err => console.log('SW failed', err));
     }
@@ -1530,7 +1530,7 @@
 
     <div id="vn-section" class="vn-section"></div>
 
-    <button class="btn-share" onclick="shareExpose()">
+    <button class="btn-share btn-pressable" onclick="shareExpose()">
       <svg viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
       Flex your streak
     </button>
@@ -1575,7 +1575,7 @@
       <h2 class="screen-title">Your week<br />in patterns.</h2>
     </div>
     <div id="pattern-content"></div>
-    <button class="btn-ghost" onclick="goHome()">← Back to Home</button>
+    <button class="btn-ghost btn-pressable" onclick="goHome()">← Back to Home</button>
   </section>
 
   <!-- ── SETTINGS ── -->
@@ -1589,7 +1589,7 @@
         <p class="s-row-title">Daily reminder</p>
         <p class="s-row-sub">One notification per day</p>
       </div>
-      <label class="toggle-wrap">
+      <label class="toggle-wrap btn-pressable">
         <input type="checkbox" id="notif-toggle" class="toggle-input" onchange="onToggleNotifications(this)">
         <span class="toggle-slider"></span>
       </label>
@@ -1601,7 +1601,7 @@
         <p class="s-row-title">Reminder time</p>
         <p class="s-row-sub">Default is based on when you usually open the app</p>
       </div>
-      <select id="notif-hour-select" class="s-select" onchange="onHourChange(this)"></select>
+      <select id="notif-hour-select" class="s-select btn-pressable" onchange="onHourChange(this)"></select>
     </div>
 
     <p class="s-section-label" style="margin-top:28px">DATA</p>
@@ -1611,14 +1611,14 @@
         <p class="s-row-title">Reset all data</p>
         <p class="s-row-sub">Clears your streak, patterns and history</p>
       </div>
-      <button class="s-reset-btn" onclick="showResetConfirm()">Reset</button>
+      <button class="s-reset-btn btn-pressable" onclick="showResetConfirm()">Reset</button>
     </div>
 
     <div id="reset-confirm" class="s-confirm-box" style="display:none">
       <p class="s-confirm-text">Are you sure? This cannot be undone.</p>
       <div class="s-confirm-row">
-        <button class="s-confirm-yes" onclick="confirmReset()">Yes, reset</button>
-        <button class="s-confirm-no"  onclick="cancelReset()">Cancel</button>
+        <button class="s-confirm-yes btn-pressable" onclick="confirmReset()">Yes, reset</button>
+        <button class="s-confirm-no btn-pressable"  onclick="cancelReset()">Cancel</button>
       </div>
     </div>
   </section>
@@ -1760,6 +1760,50 @@
   function today()     { return new Date().toDateString(); }
 
   /* ── ROUTING ── */
+  function navigateTo(showId, hideId, direction) {
+    const showEl = document.getElementById(showId);
+    const hideEl = document.getElementById(hideId);
+    if (!showEl || !hideEl) return;
+
+    // Nav bar visibility and active state
+    const showNav = showId === 'home' || showId === 'patterns' || showId === 'settings';
+    document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
+    if      (showId === 'home')     setNavActive('home');
+    else if (showId === 'patterns') setNavActive('patterns');
+    else if (showId === 'settings') setNavActive('settings');
+
+    // Pin both screens as fixed overlays so they slide side-by-side
+    const pin = 'position:fixed;top:0;left:0;width:100%;height:100%;overflow:hidden;';
+    showEl.setAttribute('style', pin);
+    hideEl.setAttribute('style', pin);
+    showEl.style.willChange = 'transform';
+    hideEl.style.willChange = 'transform';
+
+    // Apply slide direction classes
+    if (direction === 'forward') {
+      hideEl.classList.add('slide-out-left');
+      showEl.classList.add('slide-in-right');
+    } else {
+      hideEl.classList.add('slide-out-right');
+      showEl.classList.add('slide-in-left');
+    }
+
+    // Activate incoming screen (triggers display:flex via .screen.active)
+    showEl.classList.add('active');
+
+    setTimeout(() => {
+      // Remove outgoing screen
+      hideEl.classList.remove('active', 'slide-out-left', 'slide-out-right');
+      hideEl.removeAttribute('style');
+
+      // Restore incoming screen to normal CSS-driven layout
+      showEl.classList.remove('slide-in-right', 'slide-in-left');
+      showEl.removeAttribute('style');
+
+      window.scrollTo({ top: 0 });
+    }, 320);
+  }
+
   function goTo(id) {
     const curr = document.querySelector('.screen.active');
     const showNav = (id === 'home' || id === 'patterns' || id === 'settings');
@@ -1953,9 +1997,15 @@
   }
 
   function goHome() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
     resetMirror();
     renderHome();
-    goTo('home');
+    if (currId && currId !== 'home') {
+      navigateTo('home', currId, 'back');
+    } else {
+      goTo('home');
+    }
   }
 
   /* ── MIRROR ── */
@@ -1969,11 +2019,11 @@
       const opts = sets[qId];
       const el   = document.getElementById(qId + '-options');
       el.innerHTML = opts.map(text =>
-        `<button class="option" onclick="selectOption(this,'${qId}')">
+        `<button class="option btn-pressable-card" onclick="selectOption(this,'${qId}')">
           <span>${text}</span>${CHECK_SVG}
         </button>`
       ).join('') +
-      `<button class="option" style="color:#666" onclick="selectCustomOption('${qId}')">
+      `<button class="option btn-pressable-card" style="color:#666" onclick="selectCustomOption('${qId}')">
         <span>Let me type it</span>${CHECK_SVG}
       </button>`;
     });
@@ -2070,7 +2120,7 @@
     } else {
       saveSession();
       buildOneMove();
-      setTimeout(() => goTo('onemove'), 280);
+      setTimeout(() => navigateTo('onemove', 'mirror', 'forward'), 280);
     }
   }
 
@@ -2124,7 +2174,7 @@
     localStorage.setItem('total_completions', String(prev + 1));
     fireAnimation(() => {
       renderHome();
-      goTo('home');
+      navigateTo('home', 'onemove', 'forward');
     });
   }
 
@@ -2132,7 +2182,7 @@
     vnReleaseStream();
     fireAnimation(() => {
       renderHome();
-      goTo('home');
+      navigateTo('home', 'onemove', 'forward');
     });
   }
 
@@ -2171,9 +2221,15 @@
 
   /* ── PATTERNS ── */
   function showPatterns() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
     renderPatterns();
-    setNavActive('patterns');
-    goTo('patterns');
+    if (currId && currId !== 'patterns') {
+      navigateTo('patterns', currId, 'forward');
+    } else {
+      setNavActive('patterns');
+      goTo('patterns');
+    }
   }
 
   function last7Days() {
@@ -2494,11 +2550,11 @@
       <span class="vn-sheet-handle"></span>
       <div class="vn-sheet-top">
         <span class="vn-sheet-label">TODAY'S NOTE</span>
-        <button class="vn-sheet-close" onclick="vnCloseSheet()"><i class="ti ti-x"></i></button>
+        <button class="vn-sheet-close btn-pressable" onclick="vnCloseSheet()"><i class="ti ti-x"></i></button>
       </div>
       <div class="vn-waveform" id="vn-waveform" style="margin:16px 0"></div>
       <div class="vn-sheet-controls">
-        <button class="vn-sheet-play-btn" onclick="vnTogglePlay()">
+        <button class="vn-sheet-play-btn btn-pressable" onclick="vnTogglePlay()">
           <i class="ti ti-player-play" id="vn-play-icon"></i>
         </button>
         <span class="vn-sheet-date">Recorded today</span>
@@ -2715,9 +2771,15 @@
 
   /* ── SETTINGS ── */
   function showSettings() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
     renderSettings();
-    setNavActive('settings');
-    goTo('settings');
+    if (currId && currId !== 'settings') {
+      navigateTo('settings', currId, 'forward');
+    } else {
+      setNavActive('settings');
+      goTo('settings');
+    }
   }
 
   function renderSettings() {

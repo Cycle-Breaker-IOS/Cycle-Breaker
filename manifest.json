@@ -1,7 +1,7 @@
 {
   "name": "The Cycle Breaker",
   "short_name": "Cycle Breaker",
-  "start_url": "/",
+  "start_url": "/Cycle-Breaker/",
   "display": "standalone",
   "background_color": "#0f0f0f",
   "theme_color": "#0f0f0f",
