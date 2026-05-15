@@ -1388,20 +1388,6 @@
           <i class="ti ti-bell ob-s3-bell"></i>
           <p class="ob-s3-headline">One message a day.</p>
           <p class="ob-s3-body">No spam. No guilt trips. Just a nudge when you're about to let your cycle win.</p>
-          <div class="ob-features">
-            <div class="ob-feature-row">
-              <i class="ti ti-check"></i>
-              <span>Timed to when you usually slip</span>
-            </div>
-            <div class="ob-feature-row">
-              <i class="ti ti-check"></i>
-              <span>Pulls from your actual pattern — not generic reminders</span>
-            </div>
-            <div class="ob-feature-row">
-              <i class="ti ti-check"></i>
-              <span>Turn it off anytime in settings</span>
-            </div>
-          </div>
         </div>
         <div class="ob-footer">
           <button class="ob-btn-primary btn-pressable" onclick="obRequestNotifications()">Turn on notifications</button>
@@ -1430,7 +1416,6 @@
       </div>
 
       <div class="h-dots" id="h-dots"></div>
-      <p class="h-encourage" id="h-encourage"></p>
 
       <div class="h-badge btn-pressable-card" id="h-badge">
         <span class="h-badge-dot"></span>
@@ -1523,12 +1508,10 @@
     <div class="bolt-icon"><i class="ti ti-bolt" style="font-size:22px;color:#E8571A"></i></div>
     <p class="showed-up">You showed up.</p>
     <h2 class="onemove-title">Your one move today</h2>
-    <p class="onemove-sub">Based on your pattern</p>
 
     <div class="move-card">
       <p class="move-card-label">Do this before noon</p>
       <p class="move-card-text" id="move-card-text"></p>
-      <p class="move-card-target" id="move-card-target"></p>
     </div>
 
     <div class="move-actions">
@@ -1583,7 +1566,6 @@
       <h2 class="screen-title">Your week<br />in patterns.</h2>
     </div>
     <div id="pattern-content"></div>
-    <button class="btn-ghost btn-pressable" onclick="goHome()">← Back to Home</button>
   </section>
 
   <!-- ── SETTINGS ── -->
@@ -1916,13 +1898,6 @@
       </div>`;
     }).join('');
 
-    // Encouraging line
-    const encourageEl = document.getElementById('h-encourage');
-    const hasAnyLog = log.length > 0;
-    const msg = getEncourageMsg(hasAnyLog ? weekCompleted : 0);
-    encourageEl.textContent = msg.text;
-    encourageEl.style.color  = msg.color;
-
     // Pattern badge
     const badge     = document.getElementById('h-badge');
     const badgeText = document.getElementById('h-badge-text');
@@ -2125,7 +2100,6 @@
     const cat = getAvoidanceCategory();
     const map = ONE_MOVE_BY_CAT[cat] || ONE_MOVE_BY_CAT.other;
     document.getElementById('move-card-text').textContent   = map.text;
-    document.getElementById('move-card-target').textContent = map.target;
 
     // Show "Flex your streak" only after first completion (total_completions >= 1)
     const completions = parseInt(localStorage.getItem('total_completions') || '0', 10);
@@ -2286,7 +2260,6 @@
       </div>
       <p class="section-label">This Week</p>
       <div class="week-grid">${grid}</div>
-      <p class="section-label">Full Breakdown</p>
       <div class="breakdown-list">${bars}</div>
     `;
 
@@ -2410,7 +2383,7 @@
 
     el.innerHTML = `
       <p class="vn-label">SAY SOMETHING TO YOURSELF</p>
-      <p class="vn-subline">Hold to record. 30 seconds max.</p>
+      <p class="vn-subline">Hold to record.</p>
       <button class="vn-record-btn" id="vn-record-btn">
         <i class="ti ti-microphone"></i>
       </button>

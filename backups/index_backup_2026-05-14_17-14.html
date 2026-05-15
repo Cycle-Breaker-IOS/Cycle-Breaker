@@ -15,7 +15,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
+      navigator.serviceWorker.register('Cycle-Breaker/service-worker.js')
         .then(() => console.log('SW registered'))
         .catch(err => console.log('SW failed', err));
     }
@@ -61,22 +61,40 @@
 
     /* ── TRANSITIONS ── */
     .screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       display: none;
       flex-direction: column;
       padding: 28px 20px 100px;
-      min-height: 100dvh;
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
     }
     .screen.active {
       display: flex;
-      animation: fadeUp 0.32s cubic-bezier(0.22,1,0.36,1) both;
     }
-    .screen.out {
-      display: flex !important;
-      animation: fadeDown 0.2s ease forwards;
+    @keyframes fadeScale {
+      from { opacity: 0; transform: scale(0.98); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(0.98); }
+    }
+    .screen-enter {
+      animation: fadeScale 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+      z-index: 10;
+    }
+    .screen-exit {
+      animation: fadeOut 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
       pointer-events: none;
+      z-index: 9;
     }
-    @keyframes fadeUp   { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
-    @keyframes fadeDown { from { opacity:1 } to { opacity:0; transform:translateY(-8px) } }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
 
     /* ── BUTTON PRESS FEEDBACK ── */
     * { -webkit-tap-highlight-color: transparent; }
@@ -97,16 +115,6 @@
       transition: transform 100ms ease-out;
     }
 
-    /* ── SCREEN SLIDE TRANSITIONS ── */
-    @keyframes slideInFromRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
-    @keyframes slideOutToLeft   { from { transform: translateX(0); }    to { transform: translateX(-100%); } }
-    @keyframes slideInFromLeft  { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-    @keyframes slideOutToRight  { from { transform: translateX(0); }    to { transform: translateX(100%); } }
-    /* Higher specificity (0,3,0) overrides .screen.active fadeUp (0,2,0) when slide class is present */
-    .screen.active.slide-in-right  { animation: slideInFromRight 320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-in-left   { animation: slideInFromLeft  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-out-left  { animation: slideOutToLeft   320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-out-right { animation: slideOutToRight  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
 
     /* ── BOTTOM NAV ── */
     .nav-bar {
@@ -1422,7 +1430,6 @@
       </div>
 
       <div class="h-dots" id="h-dots"></div>
-      <p class="h-encourage" id="h-encourage"></p>
 
       <div class="h-badge btn-pressable-card" id="h-badge">
         <span class="h-badge-dot"></span>
@@ -1575,7 +1582,6 @@
       <h2 class="screen-title">Your week<br />in patterns.</h2>
     </div>
     <div id="pattern-content"></div>
-    <button class="btn-ghost btn-pressable" onclick="goHome()">← Back to Home</button>
   </section>
 
   <!-- ── SETTINGS ── -->
@@ -1759,11 +1765,6 @@
   function yesterday() { return new Date(Date.now() - 86400000).toDateString(); }
   function today()     { return new Date().toDateString(); }
 
-  /* ── HAPTIC ── */
-  function hapticTap() {
-    if ('vibrate' in navigator) navigator.vibrate(20);
-  }
-
   /* ── ROUTING ── */
   function navigateTo(showId, hideId, direction) {
     const showEl = document.getElementById(showId);
@@ -1777,47 +1778,35 @@
     else if (showId === 'patterns') setNavActive('patterns');
     else if (showId === 'settings') setNavActive('settings');
 
-    // Pin both screens as fixed overlays so they slide side-by-side
-    const pin = 'position:fixed;top:0;left:0;width:100%;height:100%;overflow:hidden;';
-    showEl.setAttribute('style', pin);
-    hideEl.setAttribute('style', pin);
-    showEl.style.willChange = 'transform';
-    hideEl.style.willChange = 'transform';
+    // Exit animation on outgoing screen
+    hideEl.classList.add('screen-exit');
 
-    // Apply slide direction classes
-    if (direction === 'forward') {
-      hideEl.classList.add('slide-out-left');
-      showEl.classList.add('slide-in-right');
-    } else {
-      hideEl.classList.add('slide-out-right');
-      showEl.classList.add('slide-in-left');
-    }
-
-    // Activate incoming screen (triggers display:flex via .screen.active)
-    showEl.classList.add('active');
+    // Activate and animate incoming screen
+    showEl.classList.add('active', 'screen-enter');
 
     setTimeout(() => {
-      // Remove outgoing screen
-      hideEl.classList.remove('active', 'slide-out-left', 'slide-out-right');
-      hideEl.removeAttribute('style');
-
-      // Restore incoming screen to normal CSS-driven layout
-      showEl.classList.remove('slide-in-right', 'slide-in-left');
-      showEl.removeAttribute('style');
-
+      hideEl.classList.remove('active', 'screen-exit');
+      showEl.classList.remove('screen-enter');
       window.scrollTo({ top: 0 });
-    }, 320);
+    }, 300);
   }
 
   function goTo(id) {
     const curr = document.querySelector('.screen.active');
     const showNav = (id === 'home' || id === 'patterns' || id === 'settings');
     document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
-    if (!curr) { document.getElementById(id).classList.add('active'); return; }
-    curr.classList.add('out');
+    if (!curr) {
+      const el = document.getElementById(id);
+      el.classList.add('active', 'screen-enter');
+      setTimeout(() => el.classList.remove('screen-enter'), 300);
+      return;
+    }
+    curr.classList.add('screen-exit');
     setTimeout(() => {
-      curr.classList.remove('active', 'out');
-      document.getElementById(id).classList.add('active');
+      curr.classList.remove('active', 'screen-exit');
+      const el = document.getElementById(id);
+      el.classList.add('active', 'screen-enter');
+      setTimeout(() => el.classList.remove('screen-enter'), 300);
       window.scrollTo({ top: 0 });
     }, 200);
   }
@@ -1924,13 +1913,6 @@
         <i class="ti ${done ? 'ti-check' : 'ti-x'}"></i>
       </div>`;
     }).join('');
-
-    // Encouraging line
-    const encourageEl = document.getElementById('h-encourage');
-    const hasAnyLog = log.length > 0;
-    const msg = getEncourageMsg(hasAnyLog ? weekCompleted : 0);
-    encourageEl.textContent = msg.text;
-    encourageEl.style.color  = msg.color;
 
     // Pattern badge
     const badge     = document.getElementById('h-badge');
@@ -2166,84 +2148,6 @@
     });
   }
 
-  /* ── COMPLETION BURST ── */
-  function triggerCompletionBurst() {
-    if ('vibrate' in navigator) navigator.vibrate([30, 50, 30, 50, 30]);
-
-    const container = document.createElement('div');
-    container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;';
-    document.body.appendChild(container);
-
-    const colors = [];
-    for (let i = 0; i < 24; i++) {
-      const r = Math.random();
-      if      (r < 0.40) colors.push('#E8571A');
-      else if (r < 0.70) colors.push('#FF7A3D');
-      else if (r < 0.90) colors.push('#FFB347');
-      else               colors.push('#f0f0f0');
-    }
-
-    let maxEnd = 0;
-    colors.forEach((color, i) => {
-      const p       = document.createElement('div');
-      const w       = 5 + Math.random() * 4;
-      const h       = 8 + Math.random() * 6;
-      const angle   = Math.random() * Math.PI * 2;
-      const dist    = 80 + Math.random() * 140;
-      const endX    = Math.cos(angle) * dist;
-      const endY    = Math.sin(angle) * dist;
-      const dur     = 500 + Math.random() * 300;
-      const delay   = Math.random() * 150;
-      const rot     = 180 + Math.random() * 180;
-
-      p.style.cssText = `position:absolute;width:${w}px;height:${h}px;border-radius:3px;background:${color};left:50%;top:50%;transform:translate(-50%,-50%);`;
-      container.appendChild(p);
-
-      p.animate([
-        { transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
-        { transform: `translate(calc(-50% + ${endX}px),calc(-50% + ${endY}px)) scale(0.3) rotate(${rot}deg)`, opacity: 0 }
-      ], {
-        duration: dur,
-        delay:    delay,
-        easing:   'cubic-bezier(0.25,0.46,0.45,0.94)',
-        fill:     'forwards'
-      });
-
-      maxEnd = Math.max(maxEnd, dur + delay);
-    });
-
-    setTimeout(() => { container.remove(); }, maxEnd + 50);
-  }
-
-  /* ── STREAK POP ── */
-  function animateStreakPop() {
-    const streakNumEl = document.getElementById('h-stat-streak');
-    const streakCard  = document.querySelector('.h-stat-card');
-    if (!streakNumEl || !streakCard) return;
-
-    if ('vibrate' in navigator) navigator.vibrate([20, 40, 20]);
-
-    streakNumEl.animate([
-      { transform: 'scale(1)',    color: '#E8571A' },
-      { transform: 'scale(1.35)', color: '#FF7A3D', offset: 0.4 },
-      { transform: 'scale(0.95)', color: '#E8571A', offset: 0.7 },
-      { transform: 'scale(1)',    color: '#E8571A' }
-    ], {
-      duration: 400,
-      easing:   'cubic-bezier(0.34,1.56,0.64,1)',
-      fill:     'forwards'
-    });
-
-    streakCard.animate([
-      { boxShadow: '0 0 0px rgba(232,87,26,0)' },
-      { boxShadow: '0 0 20px rgba(232,87,26,0.4)' },
-      { boxShadow: '0 0 0px rgba(232,87,26,0)' }
-    ], {
-      duration: 600,
-      easing:   'ease-out'
-    });
-  }
-
   function didIt() {
     vnReleaseStream();
     const todayStr = todayISO();
@@ -2258,10 +2162,6 @@
     fireAnimation(() => {
       renderHome();
       navigateTo('home', 'onemove', 'forward');
-      setTimeout(() => {
-        triggerCompletionBurst();
-        animateStreakPop();
-      }, 340);
     });
   }
 
@@ -2377,7 +2277,6 @@
       </div>
       <p class="section-label">This Week</p>
       <div class="week-grid">${grid}</div>
-      <p class="section-label">Full Breakdown</p>
       <div class="breakdown-list">${bars}</div>
     `;
 
@@ -2786,7 +2685,9 @@
     // Go directly to Daily Mirror
     document.getElementById('home').classList.remove('active');
     resetMirror();
-    document.getElementById('mirror').classList.add('active');
+    const mirrorEl = document.getElementById('mirror');
+    mirrorEl.classList.add('active', 'screen-enter');
+    setTimeout(() => mirrorEl.classList.remove('screen-enter'), 300);
     window.scrollTo({ top: 0 });
   }
 
