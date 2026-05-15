@@ -15,7 +15,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
+      navigator.serviceWorker.register('Cycle-Breaker/service-worker.js')
         .then(() => console.log('SW registered'))
         .catch(err => console.log('SW failed', err));
     }
@@ -61,22 +61,40 @@
 
     /* ── TRANSITIONS ── */
     .screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       display: none;
       flex-direction: column;
       padding: 28px 20px 100px;
-      min-height: 100dvh;
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
     }
     .screen.active {
       display: flex;
-      animation: fadeUp 0.32s cubic-bezier(0.22,1,0.36,1) both;
     }
-    .screen.out {
-      display: flex !important;
-      animation: fadeDown 0.2s ease forwards;
+    @keyframes fadeScale {
+      from { opacity: 0; transform: scale(0.98); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(0.98); }
+    }
+    .screen-enter {
+      animation: fadeScale 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+      z-index: 10;
+    }
+    .screen-exit {
+      animation: fadeOut 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
       pointer-events: none;
+      z-index: 9;
     }
-    @keyframes fadeUp   { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
-    @keyframes fadeDown { from { opacity:1 } to { opacity:0; transform:translateY(-8px) } }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
 
     /* ── BUTTON PRESS FEEDBACK ── */
     * { -webkit-tap-highlight-color: transparent; }
@@ -97,16 +115,6 @@
       transition: transform 100ms ease-out;
     }
 
-    /* ── SCREEN SLIDE TRANSITIONS ── */
-    @keyframes slideInFromRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
-    @keyframes slideOutToLeft   { from { transform: translateX(0); }    to { transform: translateX(-100%); } }
-    @keyframes slideInFromLeft  { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-    @keyframes slideOutToRight  { from { transform: translateX(0); }    to { transform: translateX(100%); } }
-    /* Higher specificity (0,3,0) overrides .screen.active fadeUp (0,2,0) when slide class is present */
-    .screen.active.slide-in-right  { animation: slideInFromRight 320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-in-left   { animation: slideInFromLeft  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-out-left  { animation: slideOutToLeft   320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-out-right { animation: slideOutToRight  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
 
     /* ── BOTTOM NAV ── */
     .nav-bar {
@@ -1760,15 +1768,47 @@
   function today()     { return new Date().toDateString(); }
 
   /* ── ROUTING ── */
+  function navigateTo(showId, hideId, direction) {
+    const showEl = document.getElementById(showId);
+    const hideEl = document.getElementById(hideId);
+    if (!showEl || !hideEl) return;
+
+    // Nav bar visibility and active state
+    const showNav = showId === 'home' || showId === 'patterns' || showId === 'settings';
+    document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
+    if      (showId === 'home')     setNavActive('home');
+    else if (showId === 'patterns') setNavActive('patterns');
+    else if (showId === 'settings') setNavActive('settings');
+
+    // Exit animation on outgoing screen
+    hideEl.classList.add('screen-exit');
+
+    // Activate and animate incoming screen
+    showEl.classList.add('active', 'screen-enter');
+
+    setTimeout(() => {
+      hideEl.classList.remove('active', 'screen-exit');
+      showEl.classList.remove('screen-enter');
+      window.scrollTo({ top: 0 });
+    }, 300);
+  }
+
   function goTo(id) {
     const curr = document.querySelector('.screen.active');
     const showNav = (id === 'home' || id === 'patterns' || id === 'settings');
     document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
-    if (!curr) { document.getElementById(id).classList.add('active'); return; }
-    curr.classList.add('out');
+    if (!curr) {
+      const el = document.getElementById(id);
+      el.classList.add('active', 'screen-enter');
+      setTimeout(() => el.classList.remove('screen-enter'), 300);
+      return;
+    }
+    curr.classList.add('screen-exit');
     setTimeout(() => {
-      curr.classList.remove('active', 'out');
-      document.getElementById(id).classList.add('active');
+      curr.classList.remove('active', 'screen-exit');
+      const el = document.getElementById(id);
+      el.classList.add('active', 'screen-enter');
+      setTimeout(() => el.classList.remove('screen-enter'), 300);
       window.scrollTo({ top: 0 });
     }, 200);
   }
@@ -1953,9 +1993,15 @@
   }
 
   function goHome() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
     resetMirror();
     renderHome();
-    goTo('home');
+    if (currId && currId !== 'home') {
+      navigateTo('home', currId, 'back');
+    } else {
+      goTo('home');
+    }
   }
 
   /* ── MIRROR ── */
@@ -2070,7 +2116,7 @@
     } else {
       saveSession();
       buildOneMove();
-      setTimeout(() => goTo('onemove'), 280);
+      setTimeout(() => navigateTo('onemove', 'mirror', 'forward'), 280);
     }
   }
 
@@ -2124,7 +2170,7 @@
     localStorage.setItem('total_completions', String(prev + 1));
     fireAnimation(() => {
       renderHome();
-      goTo('home');
+      navigateTo('home', 'onemove', 'forward');
     });
   }
 
@@ -2132,7 +2178,7 @@
     vnReleaseStream();
     fireAnimation(() => {
       renderHome();
-      goTo('home');
+      navigateTo('home', 'onemove', 'forward');
     });
   }
 
@@ -2171,9 +2217,15 @@
 
   /* ── PATTERNS ── */
   function showPatterns() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
     renderPatterns();
-    setNavActive('patterns');
-    goTo('patterns');
+    if (currId && currId !== 'patterns') {
+      navigateTo('patterns', currId, 'forward');
+    } else {
+      setNavActive('patterns');
+      goTo('patterns');
+    }
   }
 
   function last7Days() {
@@ -2643,7 +2695,9 @@
     // Go directly to Daily Mirror
     document.getElementById('home').classList.remove('active');
     resetMirror();
-    document.getElementById('mirror').classList.add('active');
+    const mirrorEl = document.getElementById('mirror');
+    mirrorEl.classList.add('active', 'screen-enter');
+    setTimeout(() => mirrorEl.classList.remove('screen-enter'), 300);
     window.scrollTo({ top: 0 });
   }
 
@@ -2715,9 +2769,15 @@
 
   /* ── SETTINGS ── */
   function showSettings() {
+    const curr = document.querySelector('.screen.active');
+    const currId = curr ? curr.id : null;
     renderSettings();
-    setNavActive('settings');
-    goTo('settings');
+    if (currId && currId !== 'settings') {
+      navigateTo('settings', currId, 'forward');
+    } else {
+      setNavActive('settings');
+      goTo('settings');
+    }
   }
 
   function renderSettings() {
