@@ -15,7 +15,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js')
+      navigator.serviceWorker.register('Cycle-Breaker/service-worker.js')
         .then(() => console.log('SW registered'))
         .catch(err => console.log('SW failed', err));
     }
@@ -61,22 +61,40 @@
 
     /* ── TRANSITIONS ── */
     .screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       display: none;
       flex-direction: column;
       padding: 28px 20px 100px;
-      min-height: 100dvh;
+      box-sizing: border-box;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
     }
     .screen.active {
       display: flex;
-      animation: fadeUp 0.32s cubic-bezier(0.22,1,0.36,1) both;
     }
-    .screen.out {
-      display: flex !important;
-      animation: fadeDown 0.2s ease forwards;
+    @keyframes fadeScale {
+      from { opacity: 0; transform: scale(0.98); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(0.98); }
+    }
+    .screen-enter {
+      animation: fadeScale 300ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+      z-index: 10;
+    }
+    .screen-exit {
+      animation: fadeOut 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
       pointer-events: none;
+      z-index: 9;
     }
-    @keyframes fadeUp   { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
-    @keyframes fadeDown { from { opacity:1 } to { opacity:0; transform:translateY(-8px) } }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
 
     /* ── BUTTON PRESS FEEDBACK ── */
     * { -webkit-tap-highlight-color: transparent; }
@@ -97,16 +115,6 @@
       transition: transform 100ms ease-out;
     }
 
-    /* ── SCREEN SLIDE TRANSITIONS ── */
-    @keyframes slideInFromRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
-    @keyframes slideOutToLeft   { from { transform: translateX(0); }    to { transform: translateX(-100%); } }
-    @keyframes slideInFromLeft  { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-    @keyframes slideOutToRight  { from { transform: translateX(0); }    to { transform: translateX(100%); } }
-    /* Higher specificity (0,3,0) overrides .screen.active fadeUp (0,2,0) when slide class is present */
-    .screen.active.slide-in-right  { animation: slideInFromRight 320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-in-left   { animation: slideInFromLeft  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-out-left  { animation: slideOutToLeft   320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
-    .screen.active.slide-out-right { animation: slideOutToRight  320ms cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
 
     /* ── BOTTOM NAV ── */
     .nav-bar {
@@ -1082,6 +1090,30 @@
     }
     .ob-check { font-size: 14px; color: #E8571A; opacity: 0; flex-shrink: 0; }
     .ob-option.ob-selected .ob-check { opacity: 1; }
+    .ob-option-has-input { flex-direction: column; align-items: stretch; }
+    .ob-custom-input {
+      display: block;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 220ms ease, margin-top 220ms ease, padding 220ms ease;
+      margin-top: 0;
+      padding: 0;
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 0.5px solid #444;
+      color: #f0f0f0;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      -webkit-appearance: none;
+      box-sizing: border-box;
+    }
+    .ob-option.ob-selected .ob-custom-input {
+      max-height: 44px;
+      margin-top: 10px;
+      padding: 6px 0;
+    }
     /* Screen 3 */
     .ob-s3-bell { font-size: 40px; color: #E8571A; margin-bottom: 20px; display: block; }
     .ob-s3-headline {
@@ -1364,6 +1396,16 @@
               <span>Starting the work I keep delaying</span>
               <i class="ti ti-check ob-check"></i>
             </button>
+            <div class="ob-option ob-option-has-input btn-pressable-card" id="ob-opt-custom" onclick="ob2SelectCustom(this)">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span>Other — let me type it</span>
+                <i class="ti ti-check ob-check"></i>
+              </div>
+              <input type="text" class="ob-custom-input" id="ob-custom-text"
+                placeholder="What do you keep avoiding?"
+                oninput="ob2UpdateConfirmBtn()"
+                onclick="event.stopPropagation()" />
+            </div>
           </div>
         </div>
         <div class="ob-footer">
@@ -1380,20 +1422,6 @@
           <i class="ti ti-bell ob-s3-bell"></i>
           <p class="ob-s3-headline">One message a day.</p>
           <p class="ob-s3-body">No spam. No guilt trips. Just a nudge when you're about to let your cycle win.</p>
-          <div class="ob-features">
-            <div class="ob-feature-row">
-              <i class="ti ti-check"></i>
-              <span>Timed to when you usually slip</span>
-            </div>
-            <div class="ob-feature-row">
-              <i class="ti ti-check"></i>
-              <span>Pulls from your actual pattern — not generic reminders</span>
-            </div>
-            <div class="ob-feature-row">
-              <i class="ti ti-check"></i>
-              <span>Turn it off anytime in settings</span>
-            </div>
-          </div>
         </div>
         <div class="ob-footer">
           <button class="ob-btn-primary btn-pressable" onclick="obRequestNotifications()">Turn on notifications</button>
@@ -1422,7 +1450,6 @@
       </div>
 
       <div class="h-dots" id="h-dots"></div>
-      <p class="h-encourage" id="h-encourage"></p>
 
       <div class="h-badge btn-pressable-card" id="h-badge">
         <span class="h-badge-dot"></span>
@@ -1515,12 +1542,10 @@
     <div class="bolt-icon"><i class="ti ti-bolt" style="font-size:22px;color:#E8571A"></i></div>
     <p class="showed-up">You showed up.</p>
     <h2 class="onemove-title">Your one move today</h2>
-    <p class="onemove-sub">Based on your pattern</p>
 
     <div class="move-card">
       <p class="move-card-label">Do this before noon</p>
       <p class="move-card-text" id="move-card-text"></p>
-      <p class="move-card-target" id="move-card-target"></p>
     </div>
 
     <div class="move-actions">
@@ -1575,7 +1600,6 @@
       <h2 class="screen-title">Your week<br />in patterns.</h2>
     </div>
     <div id="pattern-content"></div>
-    <button class="btn-ghost btn-pressable" onclick="goHome()">← Back to Home</button>
   </section>
 
   <!-- ── SETTINGS ── -->
@@ -1648,8 +1672,24 @@
   const answers = {};
 
   /* ── AVOIDANCE CATEGORY ── */
+  /* ── AVOIDANCE ROTATION ── */
+  function resolveAvoidance() {
+    let list = null;
+    try { list = JSON.parse(localStorage.getItem('avoidance_list')); } catch(e) {}
+    // Fallback: migrate existing single-value users
+    if (!list || !Array.isArray(list) || list.length === 0) {
+      const pa = localStorage.getItem('primary_avoidance');
+      if (!pa) return;
+      list = [pa];
+      localStorage.setItem('avoidance_list', JSON.stringify(list));
+    }
+    const totalCompletions = parseInt(localStorage.getItem('total_completions') || '0', 10);
+    const idx = totalCompletions % list.length;
+    localStorage.setItem('todays_avoidance', list[idx]);
+  }
+
   function getAvoidanceCategory() {
-    const pa = (localStorage.getItem('primary_avoidance') || '').toLowerCase();
+    const pa = (localStorage.getItem('todays_avoidance') || localStorage.getItem('primary_avoidance') || '').toLowerCase();
     // Conversation avoidance (new + legacy)
     if (pa.includes('hard conversations') || pa.includes('conversations') || pa.includes('avoid'))
       return 'conversation';
@@ -1759,11 +1799,6 @@
   function yesterday() { return new Date(Date.now() - 86400000).toDateString(); }
   function today()     { return new Date().toDateString(); }
 
-  /* ── HAPTIC ── */
-  function hapticTap() {
-    if ('vibrate' in navigator) navigator.vibrate(20);
-  }
-
   /* ── ROUTING ── */
   function navigateTo(showId, hideId, direction) {
     const showEl = document.getElementById(showId);
@@ -1777,47 +1812,35 @@
     else if (showId === 'patterns') setNavActive('patterns');
     else if (showId === 'settings') setNavActive('settings');
 
-    // Pin both screens as fixed overlays so they slide side-by-side
-    const pin = 'position:fixed;top:0;left:0;width:100%;height:100%;overflow:hidden;';
-    showEl.setAttribute('style', pin);
-    hideEl.setAttribute('style', pin);
-    showEl.style.willChange = 'transform';
-    hideEl.style.willChange = 'transform';
+    // Exit animation on outgoing screen
+    hideEl.classList.add('screen-exit');
 
-    // Apply slide direction classes
-    if (direction === 'forward') {
-      hideEl.classList.add('slide-out-left');
-      showEl.classList.add('slide-in-right');
-    } else {
-      hideEl.classList.add('slide-out-right');
-      showEl.classList.add('slide-in-left');
-    }
-
-    // Activate incoming screen (triggers display:flex via .screen.active)
-    showEl.classList.add('active');
+    // Activate and animate incoming screen
+    showEl.classList.add('active', 'screen-enter');
 
     setTimeout(() => {
-      // Remove outgoing screen
-      hideEl.classList.remove('active', 'slide-out-left', 'slide-out-right');
-      hideEl.removeAttribute('style');
-
-      // Restore incoming screen to normal CSS-driven layout
-      showEl.classList.remove('slide-in-right', 'slide-in-left');
-      showEl.removeAttribute('style');
-
+      hideEl.classList.remove('active', 'screen-exit');
+      showEl.classList.remove('screen-enter');
       window.scrollTo({ top: 0 });
-    }, 320);
+    }, 300);
   }
 
   function goTo(id) {
     const curr = document.querySelector('.screen.active');
     const showNav = (id === 'home' || id === 'patterns' || id === 'settings');
     document.getElementById('nav-bar').style.display = showNav ? 'flex' : 'none';
-    if (!curr) { document.getElementById(id).classList.add('active'); return; }
-    curr.classList.add('out');
+    if (!curr) {
+      const el = document.getElementById(id);
+      el.classList.add('active', 'screen-enter');
+      setTimeout(() => el.classList.remove('screen-enter'), 300);
+      return;
+    }
+    curr.classList.add('screen-exit');
     setTimeout(() => {
-      curr.classList.remove('active', 'out');
-      document.getElementById(id).classList.add('active');
+      curr.classList.remove('active', 'screen-exit');
+      const el = document.getElementById(id);
+      el.classList.add('active', 'screen-enter');
+      setTimeout(() => el.classList.remove('screen-enter'), 300);
       window.scrollTo({ top: 0 });
     }, 200);
   }
@@ -1896,6 +1919,7 @@
 
   /* ── HOME ── */
   function renderHome() {
+    resolveAvoidance();
     const streak  = getStreak();
     const cycles  = getCycles();
     const history = getHistory();
@@ -1924,13 +1948,6 @@
         <i class="ti ${done ? 'ti-check' : 'ti-x'}"></i>
       </div>`;
     }).join('');
-
-    // Encouraging line
-    const encourageEl = document.getElementById('h-encourage');
-    const hasAnyLog = log.length > 0;
-    const msg = getEncourageMsg(hasAnyLog ? weekCompleted : 0);
-    encourageEl.textContent = msg.text;
-    encourageEl.style.color  = msg.color;
 
     // Pattern badge
     const badge     = document.getElementById('h-badge');
@@ -2134,7 +2151,6 @@
     const cat = getAvoidanceCategory();
     const map = ONE_MOVE_BY_CAT[cat] || ONE_MOVE_BY_CAT.other;
     document.getElementById('move-card-text').textContent   = map.text;
-    document.getElementById('move-card-target').textContent = map.target;
 
     // Show "Flex your streak" only after first completion (total_completions >= 1)
     const completions = parseInt(localStorage.getItem('total_completions') || '0', 10);
@@ -2166,84 +2182,6 @@
     });
   }
 
-  /* ── COMPLETION BURST ── */
-  function triggerCompletionBurst() {
-    if ('vibrate' in navigator) navigator.vibrate([30, 50, 30, 50, 30]);
-
-    const container = document.createElement('div');
-    container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden;';
-    document.body.appendChild(container);
-
-    const colors = [];
-    for (let i = 0; i < 24; i++) {
-      const r = Math.random();
-      if      (r < 0.40) colors.push('#E8571A');
-      else if (r < 0.70) colors.push('#FF7A3D');
-      else if (r < 0.90) colors.push('#FFB347');
-      else               colors.push('#f0f0f0');
-    }
-
-    let maxEnd = 0;
-    colors.forEach((color, i) => {
-      const p       = document.createElement('div');
-      const w       = 5 + Math.random() * 4;
-      const h       = 8 + Math.random() * 6;
-      const angle   = Math.random() * Math.PI * 2;
-      const dist    = 80 + Math.random() * 140;
-      const endX    = Math.cos(angle) * dist;
-      const endY    = Math.sin(angle) * dist;
-      const dur     = 500 + Math.random() * 300;
-      const delay   = Math.random() * 150;
-      const rot     = 180 + Math.random() * 180;
-
-      p.style.cssText = `position:absolute;width:${w}px;height:${h}px;border-radius:3px;background:${color};left:50%;top:50%;transform:translate(-50%,-50%);`;
-      container.appendChild(p);
-
-      p.animate([
-        { transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
-        { transform: `translate(calc(-50% + ${endX}px),calc(-50% + ${endY}px)) scale(0.3) rotate(${rot}deg)`, opacity: 0 }
-      ], {
-        duration: dur,
-        delay:    delay,
-        easing:   'cubic-bezier(0.25,0.46,0.45,0.94)',
-        fill:     'forwards'
-      });
-
-      maxEnd = Math.max(maxEnd, dur + delay);
-    });
-
-    setTimeout(() => { container.remove(); }, maxEnd + 50);
-  }
-
-  /* ── STREAK POP ── */
-  function animateStreakPop() {
-    const streakNumEl = document.getElementById('h-stat-streak');
-    const streakCard  = document.querySelector('.h-stat-card');
-    if (!streakNumEl || !streakCard) return;
-
-    if ('vibrate' in navigator) navigator.vibrate([20, 40, 20]);
-
-    streakNumEl.animate([
-      { transform: 'scale(1)',    color: '#E8571A' },
-      { transform: 'scale(1.35)', color: '#FF7A3D', offset: 0.4 },
-      { transform: 'scale(0.95)', color: '#E8571A', offset: 0.7 },
-      { transform: 'scale(1)',    color: '#E8571A' }
-    ], {
-      duration: 400,
-      easing:   'cubic-bezier(0.34,1.56,0.64,1)',
-      fill:     'forwards'
-    });
-
-    streakCard.animate([
-      { boxShadow: '0 0 0px rgba(232,87,26,0)' },
-      { boxShadow: '0 0 20px rgba(232,87,26,0.4)' },
-      { boxShadow: '0 0 0px rgba(232,87,26,0)' }
-    ], {
-      duration: 600,
-      easing:   'ease-out'
-    });
-  }
-
   function didIt() {
     vnReleaseStream();
     const todayStr = todayISO();
@@ -2258,10 +2196,6 @@
     fireAnimation(() => {
       renderHome();
       navigateTo('home', 'onemove', 'forward');
-      setTimeout(() => {
-        triggerCompletionBurst();
-        animateStreakPop();
-      }, 340);
     });
   }
 
@@ -2377,7 +2311,6 @@
       </div>
       <p class="section-label">This Week</p>
       <div class="week-grid">${grid}</div>
-      <p class="section-label">Full Breakdown</p>
       <div class="breakdown-list">${bars}</div>
     `;
 
@@ -2501,7 +2434,7 @@
 
     el.innerHTML = `
       <p class="vn-label">SAY SOMETHING TO YOURSELF</p>
-      <p class="vn-subline">Hold to record. 30 seconds max.</p>
+      <p class="vn-subline">Hold to record.</p>
       <button class="vn-record-btn" id="vn-record-btn">
         <i class="ti ti-microphone"></i>
       </button>
@@ -2600,7 +2533,7 @@
     btn.addEventListener('mousedown',   e => { e.preventDefault(); startRecording(); });
     btn.addEventListener('mouseup',     e => { e.preventDefault(); isButtonHeld = false; stopRecording(); });
     btn.addEventListener('mouseleave',  () => { isButtonHeld = false; if (vnIsRecording) stopRecording(); });
-    btn.addEventListener('touchstart',  e => { e.preventDefault(); if ('vibrate' in navigator) navigator.vibrate(10); startRecording(); }, { passive: false });
+    btn.addEventListener('touchstart',  e => { e.preventDefault(); startRecording(); }, { passive: false });
     btn.addEventListener('touchend',    e => { e.preventDefault(); isButtonHeld = false; stopRecording(); }, { passive: false });
     btn.addEventListener('touchcancel', () => { isButtonHeld = false; if (vnIsRecording) stopRecording(); });
   }
@@ -2749,7 +2682,7 @@
     'Going outside and moving',
     'Starting the work I keep delaying',
   ];
-  let ob2SelectedIndex = -1;
+  const ob2Selections = new Set();
 
   function obGoTo(screenIndex) {
     document.getElementById('ob-track').style.transform =
@@ -2757,16 +2690,44 @@
   }
 
   function ob2Select(el, idx) {
-    ob2SelectedIndex = idx;
-    el.closest('.ob-screen').querySelectorAll('.ob-option')
-      .forEach(c => c.classList.remove('ob-selected'));
-    el.classList.add('ob-selected');
-    localStorage.setItem('primary_avoidance', OB2_OPTIONS[idx]);
-    document.getElementById('ob-s2-btn').classList.remove('ob-disabled');
+    if (ob2Selections.has(idx)) {
+      ob2Selections.delete(idx);
+      el.classList.remove('ob-selected');
+    } else {
+      ob2Selections.add(idx);
+      el.classList.add('ob-selected');
+    }
+    ob2UpdateConfirmBtn();
+  }
+
+  function ob2SelectCustom(el) {
+    if (el.classList.contains('ob-selected')) {
+      el.classList.remove('ob-selected');
+      document.getElementById('ob-custom-text').value = '';
+    } else {
+      el.classList.add('ob-selected');
+      setTimeout(() => document.getElementById('ob-custom-text').focus(), 240);
+    }
+    ob2UpdateConfirmBtn();
+  }
+
+  function ob2UpdateConfirmBtn() {
+    const customText = (document.getElementById('ob-custom-text')?.value || '').trim();
+    const hasAny = ob2Selections.size > 0 || customText.length > 0;
+    document.getElementById('ob-s2-btn').classList.toggle('ob-disabled', !hasAny);
   }
 
   function ob2Confirm() {
-    if (ob2SelectedIndex < 0) return;
+    const customEl   = document.getElementById('ob-opt-custom');
+    const customText = (document.getElementById('ob-custom-text')?.value || '').trim();
+    const selected   = [];
+    ob2Selections.forEach(idx => selected.push(OB2_OPTIONS[idx]));
+    if (customEl.classList.contains('ob-selected') && customText) {
+      selected.push(customText);
+    }
+    if (selected.length === 0) return;
+    localStorage.setItem('avoidance_list',    JSON.stringify(selected));
+    localStorage.setItem('primary_avoidance', selected[0]);
     obGoTo(2);
   }
 
@@ -2786,7 +2747,9 @@
     // Go directly to Daily Mirror
     document.getElementById('home').classList.remove('active');
     resetMirror();
-    document.getElementById('mirror').classList.add('active');
+    const mirrorEl = document.getElementById('mirror');
+    mirrorEl.classList.add('active', 'screen-enter');
+    setTimeout(() => mirrorEl.classList.remove('screen-enter'), 300);
     window.scrollTo({ top: 0 });
   }
 
@@ -2935,24 +2898,6 @@
   function cancelReset() {
     document.getElementById('reset-confirm').style.display = 'none';
   }
-
-  /* ── GLOBAL HAPTIC DELEGATION ── */
-  // Covers all static and dynamically generated buttons in one place.
-  // Answer cards (option, ob-option) get a double-pulse.
-  // Mic record button is excluded here — gets its own vibrate(10) in touchstart.
-  document.addEventListener('click', function(e) {
-    if (!('vibrate' in navigator)) return;
-    const el = e.target.closest(
-      'button, label.toggle-wrap, .btn-pressable, .btn-pressable-card, .btn-pressable-nav'
-    );
-    if (!el) return;
-    if (el.classList.contains('vn-record-btn')) return;
-    if (el.classList.contains('option') || el.classList.contains('ob-option')) {
-      navigator.vibrate([15, 30, 15]);
-    } else {
-      navigator.vibrate(20);
-    }
-  });
 
   /* ── INIT ── */
   updateProgress();

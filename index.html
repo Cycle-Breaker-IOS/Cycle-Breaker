@@ -1090,6 +1090,30 @@
     }
     .ob-check { font-size: 14px; color: #E8571A; opacity: 0; flex-shrink: 0; }
     .ob-option.ob-selected .ob-check { opacity: 1; }
+    .ob-option-has-input { flex-direction: column; align-items: stretch; }
+    .ob-custom-input {
+      display: block;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 220ms ease, margin-top 220ms ease, padding 220ms ease;
+      margin-top: 0;
+      padding: 0;
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 0.5px solid #444;
+      color: #f0f0f0;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      -webkit-appearance: none;
+      box-sizing: border-box;
+    }
+    .ob-option.ob-selected .ob-custom-input {
+      max-height: 44px;
+      margin-top: 10px;
+      padding: 6px 0;
+    }
     /* Screen 3 */
     .ob-s3-bell { font-size: 40px; color: #E8571A; margin-bottom: 20px; display: block; }
     .ob-s3-headline {
@@ -1372,6 +1396,16 @@
               <span>Starting the work I keep delaying</span>
               <i class="ti ti-check ob-check"></i>
             </button>
+            <div class="ob-option ob-option-has-input btn-pressable-card" id="ob-opt-custom" onclick="ob2SelectCustom(this)">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <span>Other — let me type it</span>
+                <i class="ti ti-check ob-check"></i>
+              </div>
+              <input type="text" class="ob-custom-input" id="ob-custom-text"
+                placeholder="What do you keep avoiding?"
+                oninput="ob2UpdateConfirmBtn()"
+                onclick="event.stopPropagation()" />
+            </div>
           </div>
         </div>
         <div class="ob-footer">
@@ -1638,8 +1672,24 @@
   const answers = {};
 
   /* ── AVOIDANCE CATEGORY ── */
+  /* ── AVOIDANCE ROTATION ── */
+  function resolveAvoidance() {
+    let list = null;
+    try { list = JSON.parse(localStorage.getItem('avoidance_list')); } catch(e) {}
+    // Fallback: migrate existing single-value users
+    if (!list || !Array.isArray(list) || list.length === 0) {
+      const pa = localStorage.getItem('primary_avoidance');
+      if (!pa) return;
+      list = [pa];
+      localStorage.setItem('avoidance_list', JSON.stringify(list));
+    }
+    const totalCompletions = parseInt(localStorage.getItem('total_completions') || '0', 10);
+    const idx = totalCompletions % list.length;
+    localStorage.setItem('todays_avoidance', list[idx]);
+  }
+
   function getAvoidanceCategory() {
-    const pa = (localStorage.getItem('primary_avoidance') || '').toLowerCase();
+    const pa = (localStorage.getItem('todays_avoidance') || localStorage.getItem('primary_avoidance') || '').toLowerCase();
     // Conversation avoidance (new + legacy)
     if (pa.includes('hard conversations') || pa.includes('conversations') || pa.includes('avoid'))
       return 'conversation';
@@ -1869,6 +1919,7 @@
 
   /* ── HOME ── */
   function renderHome() {
+    resolveAvoidance();
     const streak  = getStreak();
     const cycles  = getCycles();
     const history = getHistory();
@@ -1899,15 +1950,11 @@
     }).join('');
 
     // Pattern badge
-    const badge     = document.getElementById('h-badge');
-    const badgeText = document.getElementById('h-badge-text');
-    const weekKeys  = Object.keys(history).filter(k => (new Date() - new Date(k)) < 7 * 86400000);
-    if (weekKeys.length > 0) {
-      const tally = {};
-      weekKeys.forEach(k => { const e = history[k]; if (e && e.q1) tally[e.q1] = (tally[e.q1]||0)+1; });
-      const topKey  = Object.entries(tally).sort((a,b) => b[1]-a[1])[0][0];
-      const keyword = BADGE_KEYWORD[topKey] || topKey.toLowerCase();
-      badgeText.innerHTML = `You keep avoiding <strong>${keyword}</strong>.`;
+    const badge          = document.getElementById('h-badge');
+    const badgeText      = document.getElementById('h-badge-text');
+    const todaysAvoidance = localStorage.getItem('todays_avoidance') || localStorage.getItem('primary_avoidance');
+    if (todaysAvoidance) {
+      badgeText.innerHTML = `You keep avoiding <strong>${todaysAvoidance.toLowerCase()}</strong>.`;
       badge.style.display = 'flex';
     } else {
       badge.style.display = 'none';
@@ -2001,6 +2048,7 @@
   }
 
   function resetMirror() {
+    resolveAvoidance();
     currentQ = 1;
     Object.keys(answers).forEach(k => delete answers[k]);
     document.querySelectorAll('.question-block').forEach(b => b.classList.remove('active'));
@@ -2631,7 +2679,7 @@
     'Going outside and moving',
     'Starting the work I keep delaying',
   ];
-  let ob2SelectedIndex = -1;
+  const ob2Selections = new Set();
 
   function obGoTo(screenIndex) {
     document.getElementById('ob-track').style.transform =
@@ -2639,16 +2687,44 @@
   }
 
   function ob2Select(el, idx) {
-    ob2SelectedIndex = idx;
-    el.closest('.ob-screen').querySelectorAll('.ob-option')
-      .forEach(c => c.classList.remove('ob-selected'));
-    el.classList.add('ob-selected');
-    localStorage.setItem('primary_avoidance', OB2_OPTIONS[idx]);
-    document.getElementById('ob-s2-btn').classList.remove('ob-disabled');
+    if (ob2Selections.has(idx)) {
+      ob2Selections.delete(idx);
+      el.classList.remove('ob-selected');
+    } else {
+      ob2Selections.add(idx);
+      el.classList.add('ob-selected');
+    }
+    ob2UpdateConfirmBtn();
+  }
+
+  function ob2SelectCustom(el) {
+    if (el.classList.contains('ob-selected')) {
+      el.classList.remove('ob-selected');
+      document.getElementById('ob-custom-text').value = '';
+    } else {
+      el.classList.add('ob-selected');
+      setTimeout(() => document.getElementById('ob-custom-text').focus(), 240);
+    }
+    ob2UpdateConfirmBtn();
+  }
+
+  function ob2UpdateConfirmBtn() {
+    const customText = (document.getElementById('ob-custom-text')?.value || '').trim();
+    const hasAny = ob2Selections.size > 0 || customText.length > 0;
+    document.getElementById('ob-s2-btn').classList.toggle('ob-disabled', !hasAny);
   }
 
   function ob2Confirm() {
-    if (ob2SelectedIndex < 0) return;
+    const customEl   = document.getElementById('ob-opt-custom');
+    const customText = (document.getElementById('ob-custom-text')?.value || '').trim();
+    const selected   = [];
+    ob2Selections.forEach(idx => selected.push(OB2_OPTIONS[idx]));
+    if (customEl.classList.contains('ob-selected') && customText) {
+      selected.push(customText);
+    }
+    if (selected.length === 0) return;
+    localStorage.setItem('avoidance_list',    JSON.stringify(selected));
+    localStorage.setItem('primary_avoidance', selected[0]);
     obGoTo(2);
   }
 
